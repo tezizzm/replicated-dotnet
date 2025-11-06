@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn> <!-- Suppress missing XML doc warnings during development -->
+    
+    <!-- Package Metadata -->
+    <PackageId>Replicated</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Replicated</Authors>
+    <Company>Replicated</Company>
+    <Description>.NET SDK for Replicated customer, metrics, and instance insights. Provides customer management, metrics tracking, and instance status management with automatic retry logic, environment variable support, and comprehensive error handling.</Description>
+    <PackageTags>replicated;sdk;metrics;customers;analytics;telemetry</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/replicatedhq/replicated-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/replicatedhq/replicated-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright © Replicated 2024</Copyright>
+    <PackageReleaseNotes>Initial release of Replicated .NET SDK with customer management, metrics tracking, retry logic, and environment variable support.</PackageReleaseNotes>
+    
+    <!-- SourceLink Support -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedAllSources>true</EmbedAllSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    
+    <!-- Package Validation (disabled until first release) -->
+    <!-- <EnablePackageValidation>true</EnablePackageValidation> -->
+    <!-- <PackageValidationBaselineVersion>0.1.0</PackageValidationBaselineVersion> -->
+  </PropertyGroup>
+
+  <!-- SourceLink Package -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Package References for All Targets -->
+  <ItemGroup>
+    <PackageReference Include="Polly" Version="8.3.1" />
+    <PackageReference Include="System.Text.Json" Version="6.0.10" />
+  </ItemGroup>
+
+  <!-- Package References for All Targets -->
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="7.0.2" />
+  </ItemGroup>
+
+</Project>
+

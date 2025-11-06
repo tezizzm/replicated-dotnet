@@ -1,0 +1,9 @@
+# Integration test specific ignores
+appsettings.test.json
+*.user
+*.userosscache
+
+# Don't commit test credentials
+**/appsettings.*.json
+!appsettings.json
+
