@@ -14,11 +14,11 @@ required) and exposes app info, license data, custom metrics, and instance tags.
 ## Installation
 
 ```bash
-dotnet add package Replicated
+dotnet add package Replicated-SDK
 ```
 
 ```xml
-<PackageReference Include="Replicated" Version="0.1.0" />
+<PackageReference Include="Replicated-SDK" Version="0.1.1" />
 ```
 
 ## Quick Start

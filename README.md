@@ -22,13 +22,13 @@ information, report custom metrics, and manage instance tags.
 ### Installation
 
 ```bash
-dotnet add package Replicated
+dotnet add package Replicated-SDK
 ```
 
 Or via Package Manager:
 
 ```xml
-<PackageReference Include="Replicated" Version="0.1.0" />
+<PackageReference Include="Replicated-SDK" Version="0.1.1" />
 ```
 
 ### Basic Usage

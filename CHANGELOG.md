@@ -24,6 +24,15 @@ When a **minor** release adds a new interface member to `IReplicatedClient`, tha
 
 ---
 
+## [0.1.1] - 2026-04-08
+
+### Changed
+
+- Renamed NuGet package from `Replicated` to `Replicated-SDK`
+- Corrected repository and project URLs to `tezizzm/replicated-dotnet`
+
+---
+
 ## [0.1.0] - 2026-04-07
 
 Initial release.

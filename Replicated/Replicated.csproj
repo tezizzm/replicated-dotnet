@@ -9,8 +9,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
     <!-- Package Metadata -->
-    <PackageId>Replicated</PackageId>
-    <Version>0.1.0</Version>
+    <PackageId>Replicated-SDK</PackageId>
+    <Version>0.1.1</Version>
     <Authors>Replicated</Authors>
     <Company>Replicated</Company>
     <Description>Community-maintained .NET SDK for the Replicated in-cluster API. Provides access to app info, license entitlements, custom metrics reporting, and instance tags from within a Kubernetes-deployed application managed by Replicated. Not an official Replicated product.</Description>

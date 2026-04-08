@@ -17,7 +17,7 @@ Targets **net8.0** and **net9.0**.
 ## Installation
 
 ```bash
-dotnet add package Replicated
+dotnet add package Replicated-SDK
 ```
 
 ---
