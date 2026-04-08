@@ -1,5 +1,10 @@
 # Replicated .NET SDK
 
+[![NuGet](https://img.shields.io/nuget/v/Replicated-SDK.svg)](https://www.nuget.org/packages/Replicated-SDK)
+[![CI](https://github.com/tezizzm/replicated-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/tezizzm/replicated-dotnet/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![.NET](https://img.shields.io/badge/.NET-8.0%20|%209.0-512BD4)](https://dotnet.microsoft.com)
+
 A community-maintained .NET SDK for the [Replicated](https://www.replicated.com) in-cluster API.
 Use this SDK inside a Kubernetes application managed by Replicated to read app and license
 information, report custom metrics, and manage instance tags.
