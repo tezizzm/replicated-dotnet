@@ -17,8 +17,8 @@
     <PackageTags>replicated;sdk;metrics;license;app-info;in-cluster;kubernetes</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.nuget.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/replicatedhq/replicated-dotnet</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/replicatedhq/replicated-dotnet</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/tezizzm/replicated-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/tezizzm/replicated-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Copyright>Copyright © Replicated 2026</Copyright>
     <PackageReleaseNotes>Initial release of the Replicated .NET SDK. Provides a typed client for the Replicated in-cluster API: app info, license entitlements, custom metrics, and instance tags. Includes automatic retry with exponential backoff, CancellationToken support, AOT/trim-safe JSON serialization, and Microsoft.Extensions.DependencyInjection integration.</PackageReleaseNotes>

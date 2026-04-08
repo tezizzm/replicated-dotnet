@@ -9,7 +9,7 @@ contributions are welcome.
 ## Getting started
 
 ```bash
-git clone https://github.com/replicatedhq/replicated-dotnet
+git clone https://github.com/tezizzm/replicated-dotnet
 cd replicated-dotnet
 dotnet restore
 dotnet build
@@ -55,7 +55,7 @@ dotnet test Replicated.IntegrationTests/
 
 ## Reporting bugs and requesting features
 
-Please open a [GitHub Issue](https://github.com/replicatedhq/replicated-dotnet/issues) using
+Please open a [GitHub Issue](https://github.com/tezizzm/replicated-dotnet/issues) using
 one of the provided templates. Include as much detail as possible — SDK version, .NET version,
 and a minimal reproduction if applicable.
 

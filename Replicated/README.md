@@ -5,7 +5,7 @@ A community-maintained .NET SDK for the Replicated in-cluster API.
 > **Disclaimer:** This is not an official Replicated product and is not affiliated with,
 > endorsed by, or supported by Replicated, Inc. It is not covered by any Replicated SLA or
 > support agreement. Best-effort support is provided through
-> [GitHub Issues](https://github.com/replicatedhq/replicated-dotnet/issues).
+> [GitHub Issues](https://github.com/tezizzm/replicated-dotnet/issues).
 
 The Replicated in-cluster service runs alongside your application inside a Kubernetes cluster
 managed by Replicated. This SDK connects to it at `http://replicated:3000` (no authentication

@@ -96,7 +96,7 @@ Automatic retry with exponential backoff and jitter is enabled by default (3 ret
 
 ## Links
 
-- [GitHub repository](https://github.com/replicatedhq/replicated-dotnet)
-- [Full documentation](https://github.com/replicatedhq/replicated-dotnet/blob/main/Replicated/README.md)
-- [Changelog](https://github.com/replicatedhq/replicated-dotnet/blob/main/CHANGELOG.md)
-- [License: MIT](https://github.com/replicatedhq/replicated-dotnet/blob/main/LICENSE)
+- [GitHub repository](https://github.com/tezizzm/replicated-dotnet)
+- [Full documentation](https://github.com/tezizzm/replicated-dotnet/blob/main/Replicated/README.md)
+- [Changelog](https://github.com/tezizzm/replicated-dotnet/blob/main/CHANGELOG.md)
+- [License: MIT](https://github.com/tezizzm/replicated-dotnet/blob/main/LICENSE)

@@ -7,7 +7,7 @@ information, report custom metrics, and manage instance tags.
 > **Disclaimer:** This is not an official Replicated product and is not affiliated with,
 > endorsed by, or supported by Replicated, Inc. It is not covered by any Replicated SLA or
 > support agreement. Best-effort support is provided through
-> [GitHub Issues](https://github.com/replicatedhq/replicated-dotnet/issues).
+> [GitHub Issues](https://github.com/tezizzm/replicated-dotnet/issues).
 
 ## Documentation
 
