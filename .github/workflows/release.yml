@@ -66,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     # Only publish stable releases (tags without a pre-release suffix, e.g. v1.0.0 not v1.0.0-beta.1)
     if: "!contains(github.ref, '-')"
+    permissions:
+      contents: write
 
     steps:
       - name: Download package artifact
@@ -92,7 +94,7 @@ jobs:
         with:
           tag_name: ${{ github.ref }}
           name: v${{ steps.version.outputs.VERSION }}
-          body_file: CHANGELOG.md
+          body_path: CHANGELOG.md
           draft: false
           prerelease: false
           files: ./nupkg/*.nupkg
