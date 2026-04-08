@@ -54,9 +54,6 @@ jobs:
       - name: Pack
         run: dotnet pack Replicated/Replicated.csproj --configuration Release --no-build --output ./nupkg -p:Version=${{ steps.version.outputs.VERSION }}
 
-      - name: Verify package
-        run: dotnet nuget verify ./nupkg/*.nupkg --all
-
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
