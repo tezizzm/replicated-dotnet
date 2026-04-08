@@ -1,16 +1,21 @@
 # Replicated .NET SDK
 
-Official .NET SDK for Replicated customer, metrics, and instance insights.
+A community-maintained .NET SDK for the Replicated in-cluster API.
+
+> **Disclaimer:** This is not an official Replicated product and is not affiliated with,
+> endorsed by, or supported by Replicated, Inc. It is not covered by any Replicated SLA or
+> support agreement. Best-effort support is provided through
+> [GitHub Issues](https://github.com/replicatedhq/replicated-dotnet/issues).
+
+The Replicated in-cluster service runs alongside your application inside a Kubernetes cluster
+managed by Replicated. This SDK connects to it at `http://replicated:3000` (no authentication
+required) and exposes app info, license data, custom metrics, and instance tags.
 
 ## Installation
-
-Add the package to your project:
 
 ```bash
 dotnet add package Replicated
 ```
-
-Or via Package Manager:
 
 ```xml
 <PackageReference Include="Replicated" Version="0.1.0" />
@@ -21,44 +26,29 @@ Or via Package Manager:
 ```csharp
 using Replicated;
 
-// Create a client
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app"
-);
+await using var client = new ReplicatedClient();
 
-// Get or create a customer
-var customer = client.Customer.GetOrCreate("user@example.com");
+// App info
+var app = await client.App.GetInfoAsync();
+Console.WriteLine($"{app.AppName} v{app.CurrentRelease?.VersionLabel}");
 
-// Get or create an instance
-var instance = customer.GetOrCreateInstance();
+// License info
+var license = await client.License.GetInfoAsync();
+Console.WriteLine($"License: {license.LicenseType}, Customer: {license.CustomerName}");
 
-// Send metrics
-instance.SendMetric("cpu_usage", 0.75);
-instance.SendMetric("memory_usage", 0.60);
-instance.SendMetric("active_users", 150);
+// Custom metrics
+await client.App.SendCustomMetricsAsync(new Dictionary<string, double>
+{
+    ["active_users"] = 42,
+    ["memory_mb"] = 512
+});
 
-// Set instance status and version
-instance.SetStatus("running");
-instance.SetVersion("1.0.0");
-```
-
-## Asynchronous Usage
-
-```csharp
-using Replicated;
-
-await using var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app"
-);
-
-var customer = await client.Customer.GetOrCreateAsync("user@example.com");
-var instance = await customer.GetOrCreateInstanceAsync();
-
-await instance.SendMetricAsync("cpu_usage", 0.75);
-await instance.SetStatusAsync("running");
-await instance.SetVersionAsync("1.0.0");
+// Instance tags
+await client.App.SetInstanceTagsAsync(new Dictionary<string, string>
+{
+    ["environment"] = "production",
+    ["region"] = "us-east-1"
+});
 ```
 
 ## Configuration
@@ -67,45 +57,99 @@ await instance.SetVersionAsync("1.0.0");
 
 ```csharp
 var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app",
-    baseUrl: "https://replicated.app",  // Optional, defaults to https://replicated.app
-    timeout: TimeSpan.FromSeconds(30),    // Optional, defaults to 30 seconds
-    stateDirectory: "/custom/path",      // Optional, uses platform-specific default
-    retryPolicy: customRetryPolicy       // Optional, see Retry Configuration below
+    baseUrl: "http://replicated:3000",   // optional — see env vars below
+    timeout: TimeSpan.FromSeconds(30),   // optional — default 30s
+    retryPolicy: customRetryPolicy,      // optional — see Retry Configuration
+    logger: loggerInstance               // optional — ILogger for request/retry logging
 );
 ```
 
-### Fluent Builder Pattern
+### Fluent Builder
 
 ```csharp
 var client = new ReplicatedClientBuilder()
-    .WithPublishableKey("replicated_pk_your_key_here")
-    .WithAppSlug("my-app")
-    .WithBaseUrl("https://custom.replicated.app")
+    .WithBaseUrl("http://replicated:3000")
     .WithTimeout(TimeSpan.FromSeconds(60))
-    .WithStateDirectory("/custom/state/path")
-    .FromEnvironment()  // Merge with environment variables
+    .WithRetryPolicy(new RetryPolicy { MaxRetries = 5 })
+    .WithLogger(logger)
     .Build();
 ```
 
-## Retry Configuration
+### Environment Variables
 
-The SDK includes automatic retry logic with exponential backoff to handle transient failures. By default, the SDK will retry 3 times with a 1-second initial delay.
+The constructor reads these environment variables when the corresponding parameter is not provided:
 
-### Default Retry Behavior
+| Variable | Description | Default |
+|---|---|---|
+| `REPLICATED_SDK_ENDPOINT` | Base URL of the in-cluster service | `http://replicated:3000` |
+| `REPLICATED_TIMEOUT` | Request timeout in seconds | `30` |
+| `REPLICATED_MAX_RETRIES` | Maximum retry attempts | `3` |
+| `REPLICATED_RETRY_INITIAL_DELAY` | Initial retry delay in milliseconds | `1000` |
+| `REPLICATED_RETRY_MAX_DELAY` | Maximum retry delay in milliseconds | `30000` |
+| `REPLICATED_RETRY_BACKOFF_MULTIPLIER` | Exponential backoff multiplier | `2.0` |
+| `REPLICATED_RETRY_USE_JITTER` | Enable jitter | `true` |
+| `REPLICATED_RETRY_ON_RATE_LIMIT` | Retry on 429 | `true` |
+| `REPLICATED_RETRY_ON_SERVER_ERROR` | Retry on 5xx | `true` |
+| `REPLICATED_RETRY_ON_NETWORK_ERROR` | Retry on network errors | `true` |
 
-- **Max Retries**: 3
-- **Initial Delay**: 1 second
-- **Max Delay**: 30 seconds
-- **Backoff Multiplier**: 2.0 (exponential)
-- **Jitter**: Enabled (10% variation to prevent synchronized retries)
-- **Retries On**: Network errors, rate limits (429), and server errors (5xx)
+## App Service (`client.App`)
 
-### Custom Retry Policy
+| Method | Description |
+|---|---|
+| `GetInfoAsync(ct)` | App metadata: name, slug, status, current release |
+| `GetStatusAsync(ct)` | Current application resource status |
+| `GetUpdatesAsync(ct)` | Available releases for upgrade |
+| `GetHistoryAsync(ct)` | Previously installed releases |
+| `SendCustomMetricsAsync(metrics, ct)` | Replace all custom metrics |
+| `UpsertCustomMetricsAsync(metrics, ct)` | Merge (upsert) custom metrics without replacing others |
+| `DeleteCustomMetricAsync(name, ct)` | Delete a single custom metric |
+| `SetInstanceTagsAsync(tags, ct)` | Set `Dictionary<string, string>` instance tags |
+
+## License Service (`client.License`)
+
+| Method | Description |
+|---|---|
+| `GetInfoAsync(ct)` | License metadata: type, customer name, channel, entitlements |
+| `GetFieldAsync(name, ct)` | Read a single license field by name |
+| `GetEntitlementsAsync(ct)` | List all license entitlements |
+
+## Error Handling
 
 ```csharp
-// Using RetryPolicy object
+try
+{
+    var app = await client.App.GetInfoAsync();
+}
+catch (ReplicatedAuthError ex)
+{
+    // 401 / 403 — check in-cluster service configuration
+    Console.WriteLine($"Auth error: {ex.Message} (HTTP {ex.HttpStatus})");
+}
+catch (ReplicatedRateLimitError ex)
+{
+    // 429 — automatically retried if retry policy is enabled
+    Console.WriteLine($"Rate limited: {ex.Message}");
+}
+catch (ReplicatedNetworkError ex)
+{
+    // Transport failure — automatically retried if retry policy is enabled
+    Console.WriteLine($"Network error: {ex.Message}");
+}
+catch (ReplicatedApiError ex)
+{
+    // Any other 4xx / 5xx
+    Console.WriteLine($"API error {ex.HttpStatus}: {ex.Message} (code: {ex.Code})");
+}
+```
+
+All exceptions expose `.HttpStatus` (int), `.Message` (string), and `.Code` (string, when the
+API returns one).
+
+## Retry Configuration
+
+Automatic retry with exponential backoff and jitter is enabled by default (3 retries).
+
+```csharp
 var retryPolicy = new RetryPolicy
 {
     MaxRetries = 5,
@@ -119,290 +163,98 @@ var retryPolicy = new RetryPolicy
     RetryOnNetworkError = true
 };
 
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app",
-    retryPolicy: retryPolicy
-);
+var client = new ReplicatedClient(retryPolicy: retryPolicy);
 ```
 
-### Builder Pattern with Retry Configuration
+To disable retries:
 
 ```csharp
-// Simple retry configuration
 var client = new ReplicatedClientBuilder()
-    .WithPublishableKey("replicated_pk_your_key_here")
-    .WithAppSlug("my-app")
-    .WithRetryPolicy(
-        maxRetries: 5,
-        initialDelay: TimeSpan.FromSeconds(2),
-        maxDelay: TimeSpan.FromMinutes(2),
-        backoffMultiplier: 1.5
-    )
-    .Build();
-
-// Disable retries
-var client = new ReplicatedClientBuilder()
-    .WithPublishableKey("replicated_pk_your_key_here")
-    .WithAppSlug("my-app")
     .WithoutRetries()
-    .Build();
-
-// Full configuration
-var retryPolicy = new RetryPolicy
-{
-    MaxRetries = 10,
-    InitialDelay = TimeSpan.FromSeconds(1),
-    MaxDelay = TimeSpan.FromMinutes(2),
-    BackoffMultiplier = 1.5,
-    RetryOnRateLimit = true,
-    RetryOnServerError = true
-};
-
-var client = new ReplicatedClientBuilder()
-    .WithPublishableKey("replicated_pk_your_key_here")
-    .WithAppSlug("my-app")
-    .WithRetryPolicy(retryPolicy)
     .Build();
 ```
 
-### Custom Retry Logic
+Custom retry predicate:
 
 ```csharp
 var retryPolicy = new RetryPolicy
 {
     MaxRetries = 3,
     ShouldRetry = (exception, attemptNumber) =>
-    {
-        // Custom logic: Only retry network errors, not API errors
-        if (exception is ReplicatedNetworkError)
-            return true;
-        
-        // Don't retry after 2 attempts
-        if (attemptNumber >= 2)
-            return false;
-        
-        return false;
-    }
+        exception is ReplicatedNetworkError && attemptNumber < 2
 };
-
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app",
-    retryPolicy: retryPolicy
-);
 ```
 
-## Configuration via Environment Variables
-
-The SDK supports configuration via environment variables, with constructor parameters taking precedence:
-
-### Basic Configuration
-
-```bash
-export REPLICATED_PUBLISHABLE_KEY="replicated_pk_your_key_here"
-export REPLICATED_APP_SLUG="my-app"
-export REPLICATED_BASE_URL="https://replicated.app"  # Optional
-export REPLICATED_TIMEOUT="30"  # Optional, in seconds
-export REPLICATED_STATE_DIRECTORY="/custom/path"  # Optional
-```
-
-### Retry Configuration via Environment Variables
-
-```bash
-export REPLICATED_MAX_RETRIES="5"
-export REPLICATED_RETRY_INITIAL_DELAY="2000"  # milliseconds
-export REPLICATED_RETRY_MAX_DELAY="120000"     # milliseconds
-export REPLICATED_RETRY_BACKOFF_MULTIPLIER="1.5"
-export REPLICATED_RETRY_USE_JITTER="true"
-export REPLICATED_RETRY_JITTER_PERCENTAGE="0.15"
-export REPLICATED_RETRY_ON_RATE_LIMIT="true"
-export REPLICATED_RETRY_ON_SERVER_ERROR="true"
-export REPLICATED_RETRY_ON_NETWORK_ERROR="true"
-```
-
-### Using Environment Variables
+## ASP.NET Core / Dependency Injection
 
 ```csharp
-// With FromEnvironment(), reads all configuration from environment
-var client = new ReplicatedClientBuilder()
-    .FromEnvironment()
-    .Build();
+// Default — reads REPLICATED_SDK_ENDPOINT from environment
+builder.Services.AddReplicatedClient();
 
-// Environment variables are used as fallback when parameters are not provided
-var client = new ReplicatedClient();  // Reads from environment
+// With custom base URL
+builder.Services.AddReplicatedClient(baseUrl: "http://replicated:3000");
 
-// Explicit parameters override environment variables
-var client = new ReplicatedClient(
-    publishableKey: "override_key",  // Takes precedence over REPLICATED_PUBLISHABLE_KEY
-    appSlug: "override-app"          // Takes precedence over REPLICATED_APP_SLUG
-);
+// With retry policy
+builder.Services.AddReplicatedClient(retryPolicy: new RetryPolicy { MaxRetries = 5 });
+
+// Builder delegate — full control
+builder.Services.AddReplicatedClient(b => b
+    .WithTimeout(TimeSpan.FromSeconds(60))
+    .WithRetryPolicy(new RetryPolicy { MaxRetries = 5 }));
 ```
 
-## Configuration Precedence
-
-The SDK uses the following precedence order (highest to lowest):
-
-1. **Explicit constructor parameters**
-2. **Environment variables**
-3. **Default values**
-
-For example, if both a constructor parameter and an environment variable are set, the constructor parameter is used.
-
-## Error Handling
+Inject `IReplicatedClient` wherever you need it:
 
 ```csharp
-using Replicated;
-
-try
+public class MyService(IReplicatedClient replicated)
 {
-    var customer = client.Customer.GetOrCreate("user@example.com");
-}
-catch (ReplicatedAuthError ex)
-{
-    // Authentication failed - check your publishable key
-    Console.WriteLine($"Auth error: {ex.Message} (HTTP {ex.HttpStatus})");
-}
-catch (ReplicatedRateLimitError ex)
-{
-    // Rate limit exceeded - will retry automatically if configured
-    Console.WriteLine($"Rate limit: {ex.Message}");
-}
-catch (ReplicatedNetworkError ex)
-{
-    // Network error - will retry automatically if configured
-    Console.WriteLine($"Network error: {ex.Message}");
-}
-catch (ReplicatedApiError ex)
-{
-    // API error (4xx or 5xx)
-    Console.WriteLine($"API error: {ex.Message} (HTTP {ex.HttpStatus})");
-}
-catch (ReplicatedException ex)
-{
-    // Any other Replicated SDK error
-    Console.WriteLine($"Error: {ex.Message}");
+    public async Task ReportMetrics(CancellationToken ct)
+    {
+        await replicated.App.SendCustomMetricsAsync(
+            new Dictionary<string, double> { ["users"] = 100 }, ct);
+    }
 }
 ```
 
-## State Management
+## Thread Safety
 
-The SDK automatically manages state (customer ID, instance ID, dynamic tokens) in platform-specific directories:
-
-- **macOS**: `~/Library/Application Support/Replicated/<app_slug>`
-- **Linux**: `${XDG_STATE_HOME:-~/.local/state}/replicated/<app_slug>`
-- **Windows**: `%APPDATA%\Replicated\<app_slug>`
-
-You can override the state directory:
-
-```csharp
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_your_key_here",
-    appSlug: "my-app",
-    stateDirectory: "/custom/path/to/state"
-);
-```
-
-## Features
-
-- ✅ **Automatic Retry Logic**: Configurable retry with exponential backoff and jitter
-- ✅ **Input Validation**: Comprehensive validation for all API parameters
-- ✅ **Environment Variable Support**: Flexible configuration via environment variables
-- ✅ **Fluent Builder Pattern**: Easy-to-use builder for client configuration
-- ✅ **Sync & Async Support**: Both synchronous and asynchronous methods available
-- ✅ **Cross-Platform**: Works on .NET 8.0+ and .NET 9.0+ (Windows, macOS, Linux)
-- ✅ **State Management**: Automatic caching of customer and instance IDs
-- ✅ **Error Handling**: Rich exception types for different error scenarios
+`ReplicatedClient` is safe to use from multiple threads. Register it as a singleton in DI or
+share a single instance across your application. Each request uses an independent HTTP message.
 
 ## Requirements
 
 - .NET 8.0 (LTS) or .NET 9.0 (STS)
+- Application deployed in a Replicated-managed Kubernetes cluster
 
 ## Troubleshooting
 
-### Common Issues
+### Network Errors at Startup
 
-#### "Publishable key is required" Error
-This error occurs when no publishable key is provided. Solutions:
-- Set the `REPLICATED_PUBLISHABLE_KEY` environment variable
-- Provide the key via constructor: `new ReplicatedClient("your_key", "app")`
-- Use the builder pattern: `builder.WithPublishableKey("your_key")`
+If you see `ReplicatedNetworkError` immediately, check that:
+- The pod is running inside a Replicated-managed cluster
+- The `replicated` Kubernetes service is reachable (`http://replicated:3000`)
+- `REPLICATED_SDK_ENDPOINT` is set correctly if using a non-default endpoint
 
-#### "App slug is required" Error
-Similar to above, provide the app slug via:
-- Environment variable: `REPLICATED_APP_SLUG`
-- Constructor parameter
-- Builder pattern
+### Timeouts
 
-#### Authentication Errors (401/403)
-Check that:
-- Your publishable key is valid and not expired
-- The key has necessary permissions
-- You're using the correct API endpoint (base URL)
+Increase the timeout for slow environments:
 
-#### Network Errors
-- Verify network connectivity
-- Check firewall/proxy settings
-- Ensure the API endpoint is accessible
-- Consider increasing timeout: `WithTimeout(TimeSpan.FromSeconds(60))`
-
-#### Rate Limit Errors (429)
-- Implement exponential backoff
-- Reduce request frequency
-- Enable retry policy: `WithRetryPolicy(retryOnRateLimit: true)`
-
-## FAQ
-
-### Can I use this SDK in multiple threads?
-Yes, but each thread should use its own `ReplicatedClient` instance, or you should synchronize access if sharing a client. Instance objects are not thread-safe.
-
-### How do I handle errors?
-The SDK throws specific exception types (`ReplicatedApiError`, `ReplicatedAuthError`, etc.). Catch these and handle appropriately. See [Best Practices](docs/BEST_PRACTICES.md#error-handling) for examples.
-
-### Where is state stored?
-State is stored in platform-specific directories:
-- **Windows**: `%APPDATA%\Replicated\<app_slug>`
-- **macOS**: `~/Library/Application Support/Replicated/<app_slug>`
-- **Linux**: `${XDG_STATE_HOME:-~/.local/state}/replicated/<app_slug>`
-
-You can customize this with the `stateDirectory` parameter.
-
-### Can I disable retries?
-Yes, use the builder: `builder.WithoutRetries()` or set `RetryPolicy.MaxRetries = 0`.
-
-### Is the SDK async?
-Yes! The SDK supports both synchronous and asynchronous operations. Use `*Async` methods with `async/await` for best performance.
-
-### How do I configure retry behavior?
-Use the `RetryPolicy` class or builder methods:
 ```csharp
-var client = new ReplicatedClientBuilder()
-    .WithPublishableKey("key")
-    .WithAppSlug("app")
-    .WithRetryPolicy(
-        maxRetries: 5,
-        initialDelay: TimeSpan.FromSeconds(2),
-        maxDelay: TimeSpan.FromMinutes(2)
-    )
-    .Build();
+var client = new ReplicatedClient(timeout: TimeSpan.FromSeconds(60));
 ```
 
-### Can I use this in ASP.NET Core?
-Yes! Register the client as a singleton in your dependency injection container:
+### Rate Limit Errors (429)
+
+The default retry policy handles 429s automatically. To tune the backoff:
+
 ```csharp
-services.AddSingleton<ReplicatedClient>(provider =>
-    new ReplicatedClient(
-        Environment.GetEnvironmentVariable("REPLICATED_PUBLISHABLE_KEY"),
-        Environment.GetEnvironmentVariable("REPLICATED_APP_SLUG")
-    ));
+var client = new ReplicatedClient(retryPolicy: new RetryPolicy
+{
+    MaxRetries = 5,
+    InitialDelay = TimeSpan.FromSeconds(5)
+});
 ```
-
-## Documentation
-
-- [Usage Examples](docs/EXAMPLES.md) - Comprehensive code examples
-- [Best Practices](docs/BEST_PRACTICES.md) - Recommended patterns and anti-patterns
 
 ## License
 
 MIT
-

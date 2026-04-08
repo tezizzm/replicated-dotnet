@@ -1,7 +1,7 @@
-using Replicated;
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using Replicated;
 using Xunit;
 
 namespace Replicated.Tests;

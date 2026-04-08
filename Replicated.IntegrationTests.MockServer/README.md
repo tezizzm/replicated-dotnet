@@ -1,214 +1,87 @@
-# Replicated API Mock Server
+# Replicated In-Cluster API Mock Server
 
-A minimal ASP.NET Core mock server for integration testing the Replicated .NET SDK. Simulates all Replicated API endpoints with configurable responses for testing error handling, retry logic, and client behavior.
+Minimal ASP.NET Core server that simulates the Replicated in-cluster SDK API
+(`http://replicated:3000/api/v1`) for local integration testing. Behavior is controlled via
+request headers so tests can inject error scenarios without separate server configuration.
 
-## Quick Start
-
-### 1. Start the Mock Server
+## Quick start
 
 ```bash
+# Trust the dev certificate (first time only)
+dotnet dev-certs https --trust
+
 cd Replicated.IntegrationTests.MockServer
 dotnet run
+# Server starts at https://localhost:5001
 ```
 
-The server will start on `https://localhost:5001` with HTTPS enabled.
-
-### 2. Trust Development Certificate (First Time Only)
+Run integration tests against it:
 
 ```bash
-dotnet dev-certs https --trust
+dotnet test Replicated.IntegrationTests/
 ```
 
-### 3. Verify Server is Running
+## Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/app/info` | App name, slug, status, current release |
+| GET | `/api/v1/app/status` | Resource state and sequence |
+| GET | `/api/v1/app/updates` | Available update releases |
+| GET | `/api/v1/app/history` | Previously installed releases |
+| POST | `/api/v1/app/custom-metrics` | Send (replace) custom metrics |
+| PATCH | `/api/v1/app/custom-metrics` | Merge (upsert) custom metrics |
+| DELETE | `/api/v1/app/custom-metrics/{name}` | Delete a single metric |
+| POST | `/api/v1/app/instance-tags` | Set instance tags |
+| GET | `/api/v1/license/info` | License type, customer, channel, entitlements |
+| GET | `/api/v1/license/fields` | All license fields |
+| GET | `/api/v1/license/fields/{fieldName}` | Single license field |
+| GET | `/health` | Health check |
+| GET | `/` | Endpoint listing |
+
+## Controlling responses
+
+Set request headers to inject error scenarios without changing the URL:
+
+| Header | Values | Effect |
+|---|---|---|
+| `X-Test-Status` | `401`, `403`, `404`, `429`, `400`, `500`, `502`, `503`, `504` | Returns that HTTP status |
+| `X-Test-Delay` | milliseconds | Adds a delay before responding |
+| `X-Test-Retry-After` | seconds | Sets `Retry-After` header on 429 responses |
+
+The SDK's `ReplicatedClientIntegrationTests` injects `X-Test-Status` via
+`HttpClient.DefaultRequestHeaders` to test error handling without needing multiple server
+instances.
+
+## Examples
 
 ```bash
+# Health check
 curl https://localhost:5001/health
-# Should return: {"status":"healthy","timestamp":"..."}
+
+# App info (success)
+curl https://localhost:5001/api/v1/app/info
+
+# Simulate unauthorized
+curl -H "X-Test-Status: 401" https://localhost:5001/api/v1/app/info
+
+# Simulate rate limit with retry-after
+curl -H "X-Test-Status: 429" -H "X-Test-Retry-After: 60" https://localhost:5001/api/v1/app/info
+
+# Simulate slow response
+curl -H "X-Test-Delay: 2000" https://localhost:5001/api/v1/app/info
 ```
 
-## API Endpoints
+## Custom port
 
-The mock server implements all Replicated API endpoints:
-
-### Customer Management
-- **POST** `/v3/customer` - Create or get customer
-
-### Instance Management  
-- **POST** `/v3/instance` - Create instance
-- **GET** `/kots_metrics/license_instance/info` - Get instance info
-
-### Metrics
-- **POST** `/application/custom-metrics` - Send custom metrics
-
-### Utility
-- **GET** `/health` - Health check
-- **GET** `/` - API documentation
-
-## Behavior Control
-
-Control server responses using query parameters:
-
-### Status Codes
-Add `?status={code}` to any endpoint:
-- `200` - Success (default)
-- `400` - Bad Request
-- `401` - Unauthorized  
-- `403` - Forbidden
-- `404` - Not Found
-- `429` - Rate Limited
-- `500` - Internal Server Error
-- `502` - Bad Gateway
-- `503` - Service Unavailable
-- `504` - Gateway Timeout
-
-### Response Delays
-Add `?delay={milliseconds}` to simulate slow responses:
-- `?delay=1000` - 1 second delay
-- `?delay=5000` - 5 second delay
-
-### Rate Limiting
-Add `?retryAfter={seconds}` for rate limit responses:
-- `?status=429&retryAfter=60` - Rate limited with 60 second retry
-
-## Usage Examples
-
-### Test Authentication Errors
 ```bash
-curl -X POST https://localhost:5001/v3/customer?status=401
-# Returns: {"message":"Unauthorized","code":"AUTH"}
+ASPNETCORE_URLS=https://localhost:5002 dotnet run
+TEST_BASE_URL=https://localhost:5002 dotnet test Replicated.IntegrationTests/
 ```
 
-### Test Rate Limiting
-```bash
-curl -X POST https://localhost:5001/v3/customer?status=429&retryAfter=60
-# Returns: 429 with Retry-After: 60 header
-```
+## Certificate issues
 
-### Test Slow Responses
-```bash
-curl -X POST https://localhost:5001/v3/customer?delay=2000
-# Returns: 200 after 2 second delay
-```
-
-### Test Server Errors
-```bash
-curl -X POST https://localhost:5001/v3/customer?status=500
-# Returns: {"message":"Internal Server Error","code":"SERVER_ERROR"}
-```
-
-## Integration with Tests
-
-### Set Environment Variable
-```bash
-export TEST_BASE_URL=https://localhost:5001
-```
-
-### Run Integration Tests
-```bash
-cd Replicated.IntegrationTests
-dotnet test
-```
-
-### Test Specific Scenarios
-```csharp
-[Fact]
-public async Task Unauthorized_ShouldThrowAuthError()
-{
-    var client = new ReplicatedClient(
-        publishableKey: "replicated_pk_test",
-        appSlug: "test_app", 
-        baseUrl: "https://localhost:5001");
-    
-    // This will hit: POST /v3/customer?status=401
-    Assert.Throws<ReplicatedAuthError>(() => 
-        client.Customer.GetOrCreate("install@example.com"));
-}
-```
-
-## Configuration
-
-### Custom Port
-Set the port via environment variable:
-```bash
-export ASPNETCORE_URLS=https://localhost:5002
-dotnet run
-```
-
-### Custom Base URL
-Update your integration tests to use a different base URL:
-```csharp
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_test",
-    appSlug: "test_app",
-    baseUrl: "https://localhost:5002");
-```
-
-## Response Format
-
-### Success Responses
-```json
-{
-  "customer": {
-    "id": "cust_abc12345",
-    "email": "install@example.com", 
-    "name": "Test Installation"
-  }
-}
-```
-
-### Error Responses
-```json
-{
-  "message": "Unauthorized",
-  "code": "AUTH"
-}
-```
-
-### Rate Limit Responses
-- Status: `429`
-- Headers: `Retry-After: 60`
-- Body: `{"message":"Rate limit exceeded","code":"RATE_LIMIT"}`
-
-## Troubleshooting
-
-### Certificate Issues
-If you get certificate errors:
 ```bash
 dotnet dev-certs https --clean
 dotnet dev-certs https --trust
 ```
-
-### Port Already in Use
-If port 5001 is busy:
-```bash
-export ASPNETCORE_URLS=https://localhost:5002
-dotnet run
-```
-
-### CORS Issues
-The server is configured to allow all origins for testing. If you need to restrict CORS, modify `Program.cs`.
-
-## Development
-
-### Adding New Endpoints
-1. Add the endpoint mapping in `Program.cs`
-2. Implement the status code logic
-3. Add delay support if needed
-4. Update this README
-
-### Adding New Status Codes
-1. Add the case to each endpoint's switch statement
-2. Define the response body and headers
-3. Update the documentation
-
-## Architecture
-
-- **Minimal API**: Uses ASP.NET Core minimal APIs for simplicity
-- **Query Parameters**: Behavior controlled via URL parameters
-- **Async/Await**: All endpoints are async for realistic behavior
-- **CORS Enabled**: Allows cross-origin requests for testing
-- **HTTPS Only**: Enforces secure connections
-
-## License
-
-Part of the Replicated .NET SDK project.

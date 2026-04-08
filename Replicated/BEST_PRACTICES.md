@@ -1,545 +1,222 @@
-# Replicated .NET SDK - Best Practices
+# Replicated .NET SDK — Best Practices
 
-This guide provides best practices for using the Replicated .NET SDK effectively and avoiding common pitfalls.
-
-## Table of Contents
-
-- [Client Lifecycle Management](#client-lifecycle-management)
-- [Async vs Sync Usage](#async-vs-sync-usage)
-- [Error Handling](#error-handling)
-- [Performance Recommendations](#performance-recommendations)
-- [Security Best Practices](#security-best-practices)
-- [State Management](#state-management)
-- [Resource Cleanup](#resource-cleanup)
-- [Thread Safety](#thread-safety)
-- [Testing Strategies](#testing-strategies)
-- [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+Guidelines for using the Replicated .NET SDK effectively in production.
 
 ---
 
-## Client Lifecycle Management
+## Client lifecycle
 
-### ✅ DO: Use `await using` for Automatic Disposal
+### DO: Register as a singleton
+
+`ReplicatedClient` owns a `SocketsHttpHandler` connection pool. Creating a new client per
+request defeats connection reuse and exhausts sockets.
 
 ```csharp
-// Preferred: Automatic disposal
-await using var client = new ReplicatedClient("key", "app");
-var customer = await client.Customer.GetOrCreateAsync("user@example.com");
-// Client automatically disposed when exiting scope
+// In ASP.NET Core — singleton via DI (recommended)
+builder.Services.AddReplicatedClient();
+
+// Or for non-DI contexts — create once, reuse for the lifetime of the process
+await using var client = new ReplicatedClient();
 ```
 
-### ✅ DO: Explicitly Dispose in Long-Lived Services
+### DO: Use `await using` for scoped lifetimes
 
 ```csharp
-public class MetricsService : IDisposable
+await using var client = new ReplicatedClient();
+var app = await client.App.GetInfoAsync();
+// Client disposed automatically on exit
+```
+
+### DON'T: Create a client per request or per operation
+
+```csharp
+// Bad — creates a new connection pool on every call
+foreach (var _ in events)
 {
-    private readonly ReplicatedClient _client;
-
-    public MetricsService()
-    {
-        _client = new ReplicatedClient("key", "app");
-    frames
-    
-    public void Dispose()
-    {
-        _client?.Dispose();
-    }
+    await using var client = new ReplicatedClient();
+    await client.App.SendCustomMetricsAsync(metrics);
 }
-```
 
-### ❌ DON'T: Create Clients Without Disposing
-
-```csharp
-// Bad: Client never disposed, resources leak
-var client = new ReplicatedClient("key", "app");
-// ... use client
-// Client should be disposed!
-```
-
-### ❌ DON'T: Dispose Multiple Times
-
-```csharp
-// Bad: Disposing multiple times is safe but unnecessary
-client.Dispose();
-client.Dispose(); // No need - already disposed
+// Good — create once outside the loop
+await using var client = new ReplicatedClient();
+foreach (var _ in events)
+{
+    await client.App.SendCustomMetricsAsync(metrics);
+}
 ```
 
 ---
 
-## Async vs Sync Usage
+## Async usage
 
-### ✅ DO: Prefer Async Methods in Async Contexts
+### DO: Use async/await throughout
+
+All service methods are async. Prefer `async/await` over blocking with `.Result` or `.Wait()`.
 
 ```csharp
-// Good: Use async methods in async code
-public async Task ProcessMetricsAsync()
+// Good
+var app = await client.App.GetInfoAsync();
+
+// Bad — can deadlock in ASP.NET / GUI contexts
+var app = client.App.GetInfoAsync().Result;
+```
+
+### DO: Pass CancellationToken from your caller
+
+All methods accept an optional `CancellationToken`. Pass it through for proper request
+cancellation on timeout or shutdown.
+
+```csharp
+public async Task ReportAsync(CancellationToken ct)
 {
-    await using var client = new ReplicatedClient("key", "app");
-    var customer = await client.Customer.GetOrCreateAsync("user@example.com");
-    await customer.GetOrCreateInstanceAsync().SendMetricAsync("metric", 100);
+    var app = await client.App.GetInfoAsync(ct);
+    await client.App.SendCustomMetricsAsync(metrics, ct);
 }
-```
-
-### ✅ DO: Use Sync Methods in Synchronous Contexts
-
-```csharp
-// Good: Use sync methods when you can't use async
-public void ProcessMetrics()
-{
-    using var client = new ReplicatedClient("key", "app");
-    var customer = client.Customer.GetOrCreate("user@example.com霜");
-    customer.GetOrCreateInstance().SendMetric("metric", 100);
-}
-```
-
-### ❌ DON'T: Block Async Methods with `.Wait()` or `.Result`
-
-```csharp
-// Bad: Blocks the thread, can cause deadlocks
-var customer = client.Customer.GetOrCreateAsync("user@example.com").Result;
-```
-
-### ✅ DO: Use `ConfigureAwait(false)` in Library Code
-
-```csharp
-// Good for library code: Prevents context capture
-var customer = await client.Customer.GetOrCreateAsync("user@example.com")
-    .ConfigureAwait(false);
 ```
 
 ---
 
-## Error Handling
+## Error handling
 
-### ✅ DO: Handle Specific Exception Types
+### DO: Catch specific exception types
 
 ```csharp
 try
 {
-    var customer = await client.Customer.GetOrCreateAsync("user@example.com");
+    await client.App.SendCustomMetricsAsync(metrics, ct);
 }
 catch (ReplicatedAuthError ex)
 {
-    // Handle authentication errors specifically
-    logger.LogError("Authentication failed: {Message}", ex.Message);
+    logger.LogError("Auth failed ({Status}) — check in-cluster service config", ex.HttpStatus);
 }
-catch (ReplicatedRateLimitError ex)
+catch (ReplicatedRateLimitError)
 {
-    // Handle rate limiting with backoff
-    await Task.Delay(TimeSpan.FromMinutes(1));
-    // Retry logic
+    // SDK already retries on 429 — if this surfaces, load is unusually high
+    logger.LogWarning("Replicated rate limit hit");
 }
 catch (ReplicatedNetworkError ex)
 {
-    // Handle network issues
-    logger.LogWarning("Network error: {Message}", ex.Message);
+    // In-cluster service unreachable — retried automatically by retry policy
+    logger.LogWarning("Replicated network error: {Message}", ex.Message);
 }
-catch (ArgumentException ex)
+catch (ReplicatedApiError ex)
 {
-    // Handle invalid input
-    logger.LogError("Invalid argument: {Message}", ex.Message);
+    logger.LogError("API error {Status} ({Code}): {Message}", ex.HttpStatus, ex.Code, ex.Message);
 }
 ```
 
-### ✅ DO: Log Exception Details for Debugging
+### DO: Log `.HttpStatus` and `.Code` for actionable alerts
 
 ```csharp
 catch (ReplicatedApiError ex)
 {
-    logger.LogError(ex, 
-        "API Error: {Status} {Code} - {Message}. Body: {Body}",
-        ex.HttpStatus,
-        ex.Code,
-        ex.Message,
-        ex.HttpBody ?? ex.JsonBody?.ToString() ?? "N/A");
+    logger.LogError(ex,
+        "Replicated API error {Status} {Code}: {Message}",
+        ex.HttpStatus, ex.Code ?? "—", ex.Message);
 }
 ```
 
-### ❌ DON'T: Swallow All Exceptions
+### DON'T: Swallow exceptions silently
 
 ```csharp
-// Bad: Hides errors, makes debugging impossible
-try
-{
-    instance.SendMetric("metric", 100);
-}
-catch
-{
-    // What went wrong? Who knows!
-}
+// Bad — hides problems, makes debugging impossible
+try { await client.App.SendCustomMetricsAsync(metrics); }
+catch { }
 ```
 
-### ✅ DO: Implement Retry Logic for Transient Failures
+### DON'T: Implement manual retry — the SDK already does it
+
+The default retry policy handles transient network errors, 429, and 5xx with exponential
+backoff. Wrapping calls in your own retry loop doubles the retries.
 
 ```csharp
-public async Task<bool> SendMetricWithRetryAsync(Instance instance, string name, object value)
+// Bad — unnecessary wrapper
+for (var i = 0; i < 3; i++)
 {
-    const int maxRetries = 3;
-    
-    for (int attempt = 0; attempt < maxRetries; attempt++)
-    {
-        try
-        {
-            await instance.SendMetricAsync(name, value);
-            return true;
-        }
-        catch (ReplicatedNetworkError) when (attempt < maxRetries - 1)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-        }
-        catch (ReplicatedApiError ex) when (ex.HttpStatus == 429 && attempt < maxRetries - 1)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(60));
-        }
-    }
-    
-    return false;
+    try { await client.App.SendCustomMetricsAsync(metrics); break; }
+    catch (ReplicatedNetworkError) { await Task.Delay(1000); }
 }
+
+// Good — SDK handles this
+await client.App.SendCustomMetricsAsync(metrics);
 ```
 
 ---
 
-## Performance Recommendations
+## Retry configuration
 
-### ✅ DO: Reuse Client Instances
+Tune the retry policy when you have strict latency budgets or unusual connectivity:
 
 ```csharp
-// Good: Reuse client across multiple operations
-await using var client = new ReplicatedClient("key", "app");
-var customer = await client.Customer.GetOrCreateAsync("user@example.com");
-var instance = await customer.GetOrCreateInstanceAsync();
-
-// Send multiple metrics
-await instance.SendMetricAsync("metric1", 100);
-await instance.SendMetricAsync("metric2", 200);
-await instance.SendMetricAsync("metric3", 300);
+builder.Services.AddReplicatedClient(retryPolicy: new RetryPolicy
+{
+    MaxRetries = 5,
+    InitialDelay = TimeSpan.FromSeconds(2),
+    MaxDelay = TimeSpan.FromMinutes(1)
+});
 ```
 
-### ❌ DON'T: Create New Clients for Every Operation
+Disable retries in unit tests so they fail fast:
 
 ```csharp
-// Bad: Creates unnecessary overhead
-await instance.SendMetricAsync("metric1", 100);
-
-// Bad: Creates a new client for each metric
-var client2 = new ReplicatedClient("key", "app");
-// ...
-client2.Dispose();
-```
-
-### ✅ DO: Batch Metrics When Possible
-
-```csharp
-// Good: Send multiple metrics in sequence (they're sent together)
-var instance = customer.GetOrCreateInstance();
-instance.SendMetric("cpu_usage", 0.75);
-instance.SendMetric("memory_usage", 0.60);
-instance.SendMetric("disk_usage", 0.50);
-// All metrics sent in the same request
-```
-
-### ✅ DO: Configure Appropriate Timeouts
-
-```csharp
-// Good: Set timeouts based on your network conditions
-var client = new ReplicatedClient(
-    "key",
-    "app",
-    timeout: TimeSpan.FromSeconds(60) // Longer timeout for slower networks
-);
+services.AddReplicatedClient(b => b.WithoutRetries());
 ```
 
 ---
 
-## Security Best Practices
+## Metrics
 
-### ✅ DO: Use Environment Variables for Secrets
-
-```csharp
-// Good: Don't hardcode credentials
-var client = new ReplicatedClient(
-    publishableKey: Environment.GetEnvironmentVariable("REPLICATED_PUBLISHABLE_KEY"),
-    appSlug: Environment.GetEnvironmentVariable("REPLICATED_APP_SLUG")
-);
-```
-
-### ❌ DON'T: Hardcode Publishable Keys
+### DO: Use `SendCustomMetricsAsync` to replace all metrics, `UpsertCustomMetricsAsync` to update selectively
 
 ```csharp
-// Bad: Security risk - keys in source code
-var client = new ReplicatedClient(
-    publishableKey: "replicated_pk_abc123...", // Never do this!
-    appSlug: "my-app"
-);
-```
-
-### ✅ DO: Use Secure Secret Management
-
-```csharp
-// Good: Use your platform's secret management
-var client = new ReplicatedClient(
-    publishableKey: await secretManager.GetSecretAsync("REPLICATED_PUBLISHABLE_KEY"),
-    appSlug: configuration["Replicated:AppSlug"]
-);
-```
-
-### ✅ DO: Validate Inputs Client-Side
-
-```csharp
-// Good: SDK validates inputs, but you can add additional validation
-public void SendValidatedMetric(Instance instance, string name, double value)
+// Replaces ALL metrics for this instance
+await client.App.SendCustomMetricsAsync(new Dictionary<string, double>
 {
-    if (value < 0 || value > 1)
-        throw new ArgumentOutOfRangeException(nameof(value), "Value must be between 0 and 1");
-    
-    instance.SendMetric(name, value);
-}
+    ["active_users"] = 42,
+    ["cpu_usage"] = 0.65
+});
+
+// Updates only active_users, leaves others unchanged
+await client.App.UpsertCustomMetricsAsync(new Dictionary<string, double>
+{
+    ["active_users"] = 43
+});
 ```
 
 ---
 
-## State Management
+## Testing
 
-### ✅ DO: Understand State Caching Behavior
+### DO: Inject `IReplicatedClient` for easy mocking
 
 ```csharp
-// Good: State is automatically cached
-var customer = client.Customer.GetOrCreate("user@example.com");
-// Customer ID is cached automatically
+public class MetricsReporter(IReplicatedClient replicated)
+{
+    public async Task ReportAsync(CancellationToken ct)
+        => await replicated.App.SendCustomMetricsAsync(
+               new Dictionary<string, double> { ["users"] = 100 }, ct);
+}
 
-// Later, same email uses cached ID
-var customer2 = client.Customer.GetOrCreate("user@example.com");
-// Uses cached customer ID (no API call if same email)
+// In tests
+var mock = new Mock<IReplicatedClient>();
+var sut = new MetricsReporter(mock.Object);
 ```
 
-### ✅ DO: Clear State When Switching Customers
+### DO: Disable retries in tests
 
 ```csharp
-// Good: Clear state when switching to a different customer
-client.StateManager.ClearState();
-var newCustomer = client.Customer.GetOrCreate("different@example.com");
-```
-
-### ❌ DON'T: Assume State Persists Across Processes
-
-```csharp
-// Note: State is persisted to disk, but different processes may have different state directories
-// Don't assume state from one process is available to another
-```
-
----
-
-## Resource Cleanup
-
-### ✅ DO: Dispose Clients in Finally Blocks
-
-```csharp
-try
-{
-    var client = new ReplicatedClient("key", "app");
-    // ... use client
-}
-finally
-{
-    client?.Dispose(); // Always dispose
-}
-```
-
-### ✅ DO: Use Try-Finally Pattern
-
-```csharp
-ReplicatedClient? client = null;
-try
-{
-    client = new ReplicatedClient("key", "app");
-    // ... use client
-}
-finally
-{
-    client?.Dispose();
-}
-```
-
----
-
-## Thread Safety
-
-### ✅ DO: Use One Client Per Thread or Synchronize Access
-
-```csharp
-// Good: Each thread has its own client
-public class ThreadSafeMetricsCollector
-{
-    [ThreadStatic]
-    private static ReplicatedClient? _client;
-    
-    private static ReplicatedClient GetClient()
-    {
-        if (_client == null)
-        {
-            Dep_client = new ReplicatedClient("key", "app");
-        }
-        return _client;
-    }
-}
-```
-
-### ✅ DO: Use Lock When Sharing Clients
-
-```csharp
-// Good: Synchronize access if sharing a client
-private readonly ReplicatedClient _client;
-private readonly object _lock = new object();
-
-public void SendMetric(string name, object value)
-{
-    lock (_lock)
-    {
-        // Use client safely
-        var customer = _client.Customer.GetOrCreate("user@example.com");
-        customer.GetOrCreateInstance().SendMetric(name, value);
-    }
-}
-```
-
-### ❌ DON'T: Share synchronized Instances
-
-```csharp
-// Note: Instance objects are not thread-safe
-// Each thread should create its own instance objects
-```
-
----
-
-## Testing Strategies
-
-### ✅ DO: Mock the Client for Unit Tests
-
-```csharp
-// Good: Use a mock or stub for testing
-var mockClient = new Mock<IReplicatedClient>();
-// Configure mock behavior
-var service = new MyService(mockClient.Object);
-```
-
-### ✅ DO: Use Dependency Injection for Testability
-
-```csharp
-// Good: Inject client for easy testing
-public class MetricsService
-{
-    private readonly IReplicatedClient _client;
-    
-    public MetricsService(IReplicatedClient client)
-    {
-        _client = client;
-    }
-}
-```
-
-### ✅ DO: Test Error Scenarios
-
-```csharp
-[Fact]
-public async Task HandlesNetworkErrors()
-{
-    var mockClient = new Mock<IReplicatedClient>();
-    mockClient.Setup(x => x.Customer.GetOrCreateAsync(It.IsAny<string>()))
-        .ThrowsAsync(new ReplicatedNetworkError("Network error"));
-    
-    // Test error handling
-}
-```
-
----
-
-## Anti-Patterns to Avoid
-
-### ❌ DON'T: Create Clients in Loops
-
-```csharp
-// Bad: Creates many clients unnecessarily
-foreach (var metric in metrics)
-{
-    var client = new ReplicatedClient("key", "app"); // BAD!
-    // ... use client
-    client.Dispose();
-}
-```
-
-### ✅ DO: Create Client Once and Reuse
-
-```csharp
-// Good: Create once, reuse many times
-await using var client = new ReplicatedClient("key", "app");
-foreach (var metric in metrics)
-{
-    // Reuse client
-    var customer = client.Customer.GetOrCreate("user@example.com");
-}
-```
-
-### ❌ DON'T: Ignore Validation Errors
-
-```csharp
-// Bad: Ignores validation, may cause issues later
-try
-{
-    instance.SendMetric("invalid-metric-name!", 100);
-}
-catch (ArgumentException)
-{
-    // Swallows validation error
-}
-```
-
-### ✅ DO: Validate and Handle Errors Appropriately
-
-```csharp
-// Good: Handles validation errors
-try
-{
-    instance.SendMetric("metric_name", 100);
-}
-catch (ArgumentException ex)
-{
-    logger.LogWarning("Invalid metric name: {Message}", ex.Message);
-    // Use a fallback or skip this metric
-}
-```
-
-### ❌ DON'T: Mix Sync and Async Code Incorrectly
-
-```csharp
-// Bad: Sync over async anti-pattern
-public void BadMethod()
-{
-    var customer = client.Customer.GetOrCreateAsync("user@example.com").Result;
-}
-```
-
-### ✅ DO: Use Async All the Way or Sync All the Way
-
-```csharp
-// Good: All async
-public async Task GoodMethodAsync()
-{
-    var customer = await client.Customer.GetOrCreateAsync("user@example.com");
-}
+services.AddReplicatedClient(b => b.WithoutRetries());
 ```
 
 ---
 
 ## Summary
 
-- **Always dispose clients** - Use `await using` or explicit `Dispose()`
-- **Prefer async methods** - Use async/await instead of blocking calls
-- **Handle errors specifically** - Catch specific exception types
-- **Reuse clients** - Don't create new clients for each operation
-- **Use environment variables** - Never hardcode secrets
-- **Understand state management** - Know when state is cached and cleared
-- **Test error scenarios** - Don't just test happy paths
-- **Follow thread-safety guidelines** - One client per thread or synchronize access
-
-For more examples, see [EXAMPLES.md](EXAMPLES.md).
-
+| Rule | Why |
+|---|---|
+| Register as a singleton | Shared connection pool prevents socket exhaustion |
+| Pass `CancellationToken` | Enables request cancellation on timeout/shutdown |
+| Use `async/await` | Avoids deadlocks; all methods are async-only |
+| Catch specific exceptions | `ReplicatedAuthError`, `ReplicatedRateLimitError`, `ReplicatedNetworkError`, `ReplicatedApiError` |
+| Don't wrap in manual retry | SDK retry policy (Polly) already handles transient failures |
+| Inject `IReplicatedClient` | Enables mocking in unit tests |

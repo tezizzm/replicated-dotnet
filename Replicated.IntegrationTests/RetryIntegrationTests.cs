@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading.Tasks;
 using Replicated;
 using Xunit;
@@ -13,40 +12,26 @@ public class RetryIntegrationTests : IntegrationTestBase, IClassFixture<ServerFi
     }
 
     [Fact]
-    public async Task Retries_NetworkErrorThenSuccess_ShouldSucceedWithinBounds()
+    public async Task Retries_NetworkError_ShouldRetryAndFail()
     {
-        // Test retry behavior with network error followed by success
+        // Create client with retry policy and 500 error — retries will exhaust then throw
         var policy = new RetryPolicy
         {
             MaxRetries = 2,
-            InitialDelay = TimeSpan.FromMilliseconds(200),
+            InitialDelay = TimeSpan.FromMilliseconds(100),
+            RetryOnServerError = true,
             RetryOnNetworkError = true,
-            RetryOnRateLimit = false,
-            RetryOnServerError = false,
             UseJitter = false
         };
 
-        var client = CreateClient(null, policy); // No status code - should succeed
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            await client.Customer.GetOrCreateAsync("install@example.com");
-        }
-        catch (ReplicatedNetworkError)
-        {
-            // If server not configured to succeed after a fail, this may throw. Keep test structure in place.
-        }
-        finally
-        {
-            sw.Stop();
-        }
+        var client = CreateClient("500", policy);
 
-        // Bound total elapsed to a reasonable window (no exact timing assertion)
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+        await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.App.GetInfoAsync());
     }
 
     [Fact]
-    public void Retries_ServerErrorExhaustion_ShouldThrowAfterMaxRetries()
+    public async Task Retries_ServerErrorExhaustion_ShouldThrowAfterRetries()
     {
         // Test retry exhaustion with server error
         var policy = new RetryPolicy
@@ -57,9 +42,31 @@ public class RetryIntegrationTests : IntegrationTestBase, IClassFixture<ServerFi
             UseJitter = false
         };
 
-        var client = CreateClient("500", policy); // 500 error should trigger retries
-        Assert.Throws<ReplicatedApiError>(() => client.Customer.GetOrCreate("install@example.com"));
+        var client = CreateClient("500", policy);
+
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.App.GetInfoAsync());
+
+        Assert.Equal(500, exception.HttpStatus);
+    }
+
+    [Fact]
+    public async Task Retries_NotTriggeredOn4xx_ShouldThrowImmediately()
+    {
+        // 4xx errors should not be retried
+        var policy = new RetryPolicy
+        {
+            MaxRetries = 2,
+            InitialDelay = TimeSpan.FromMilliseconds(100),
+            RetryOnServerError = false,
+            UseJitter = false
+        };
+
+        var client = CreateClient("400", policy);
+
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.App.GetInfoAsync());
+
+        Assert.Equal(400, exception.HttpStatus);
     }
 }
-
-

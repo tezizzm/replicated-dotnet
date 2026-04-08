@@ -12,14 +12,15 @@ namespace Replicated.Tests;
 
 /// <summary>
 /// Tests that exercise specific code paths in HTTP client error handling.
-/// These tests target real-world scenarios that exercise different branches in HandleResponse.
+/// These tests target real-world scenarios that exercise different branches in HandleTypedResponseAsync
+/// and ThrowForStatus.
 /// </summary>
 public class HttpClientCodePathTests
 {
     [Fact]
-    public void MakeRequest_WithErrorResponseWithJsonMessageAndCode_ShouldExtractBoth()
+    public async Task TypedPostAsync_WithErrorResponseWithJsonMessageAndCode_ShouldExtractBoth()
     {
-        // Exercise: errorMessage and errorCode extraction from JSON body
+        // Exercise: message and code extraction from JSON error body
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
             Content = new StringContent(
@@ -30,15 +31,22 @@ public class HttpClientCodePathTests
 
         var client = CreateHttpClient(handler);
 
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(400, exception.HttpStatus);
         Assert.Equal("Custom error message", exception.Message);
         Assert.Equal("CUSTOM_ERROR_CODE", exception.Code);
-        Assert.NotNull(exception.JsonBody);
+        // AOT path: JsonBody is null (only message/code are parsed from ErrorResponse)
+        Assert.Null(exception.JsonBody);
     }
 
     [Fact]
-    public void MakeRequest_WithErrorResponseNullMessage_ShouldUseDefaultMessage()
+    public async Task TypedPostAsync_WithErrorResponseNullMessage_ShouldUseDefaultMessage()
     {
         // Exercise: null message in JSON should fall back to default
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
@@ -51,16 +59,22 @@ public class HttpClientCodePathTests
 
         var client = CreateHttpClient(handler);
 
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(400, exception.HttpStatus);
-        // With null message, default is formatted as "Client error: BadRequest"
-        Assert.Contains("BadRequest", exception.Message);
+        // With null message, default is "HTTP 400"
+        Assert.Contains("HTTP", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithErrorResponseHasMessageButNoCode_ShouldOnlySetMessage()
+    public async Task TypedPostAsync_WithErrorResponseHasMessageButNoCode_ShouldOnlySetMessage()
     {
-        // Exercise: JSON has message but no code
+        // Exercise: JSON has message but no code field
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.NotFound)
         {
             Content = new StringContent(
@@ -71,16 +85,22 @@ public class HttpClientCodePathTests
 
         var client = CreateHttpClient(handler);
 
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(404, exception.HttpStatus);
         Assert.Equal("Resource not found", exception.Message);
         Assert.Null(exception.Code);
     }
 
     [Fact]
-    public void MakeRequest_WithSuccessfulResponseWithNullJson_ShouldReturnEmptyDictionary()
+    public async Task TypedPostAsync_WithSuccessfulResponseWithNullJson_ShouldReturnDefault()
     {
-        // Exercise: successful response with null JSON should return empty dict
+        // Exercise: successful response with JSON null returns default
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("null", Encoding.UTF8, "application/json")
@@ -88,68 +108,18 @@ public class HttpClientCodePathTests
 
         var client = CreateHttpClient(handler);
 
-        var result = client.MakeRequest("GET", "/test");
-        Assert.NotNull(result);
-        // Null JSON deserializes to null, which becomes empty dict
+        var result = await client.TypedPostAsync(
+            "/api/v1/app/instance-tags",
+            new InstanceTagsRequest(false, new Dictionary<string, string>()),
+            ReplicatedJsonContext.Default.InstanceTagsRequest,
+            ReplicatedJsonContext.Default.AppInfo);
+
+        // null JSON deserializes to null for a record type
+        Assert.Null(result);
     }
 
     [Fact]
-    public async Task MakeRequestAsync_WithSuccessfulResponseWithNullJson_ShouldReturnEmptyDictionary()
-    {
-        // Exercise: async version with null JSON
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("null", Encoding.UTF8, "application/json")
-        });
-
-        var client = CreateHttpClient(handler);
-
-        var result = await client.MakeRequestAsync("GET", "/test");
-        Assert.NotNull(result);
-    }
-
-    [Fact]
-    public void MakeRequest_WithErrorResponseExtractsHeaders_ShouldIncludeInException()
-    {
-        // Exercise: header extraction for errors
-        var response = new HttpResponseMessage(HttpStatusCode.InternalServerError)
-        {
-            Content = new StringContent(@"{""message"":""Error""}", Encoding.UTF8, "application/json")
-        };
-        response.Headers.Add("X-Custom-Header", "custom-value");
-
-        var handler = new TestHttpMessageHandler(response);
-        var client = CreateHttpClient(handler);
-
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
-        Assert.NotNull(exception.Headers);
-        // Just check that we have at least one header
-        Assert.True(exception.Headers.Count > 0);
-        Assert.Contains("X-Custom-Header", exception.Headers.Keys);
-    }
-
-    [Fact]
-    public async Task MakeRequestAsync_WithErrorResponseExtractsHeaders_ShouldIncludeInException()
-    {
-        // Exercise: async version of header extraction
-        var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
-        {
-            Content = new StringContent(@"{""message"":""Unauthorized""}", Encoding.UTF8, "application/json")
-        };
-        response.Headers.Add("WWW-Authenticate", "Bearer");
-
-        var handler = new TestHttpMessageHandler(response);
-        var client = CreateHttpClient(handler);
-
-        var exception = await Assert.ThrowsAsync<ReplicatedAuthError>(async () => 
-            await client.MakeRequestAsync("GET", "/test"));
-        
-        Assert.NotNull(exception.Headers);
-        Assert.True(exception.Headers.ContainsKey("WWW-Authenticate"));
-    }
-
-    [Fact]
-    public void MakeRequest_WithServerErrorWithNullErrorMessage_ShouldUseDefaultMessage()
+    public async Task TypedPostAsync_WithServerErrorWithNullErrorMessage_ShouldUseDefaultMessage()
     {
         // Exercise: 5xx error with null error message uses default
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
@@ -159,127 +129,70 @@ public class HttpClientCodePathTests
 
         var client = CreateHttpClient(handler);
 
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(500, exception.HttpStatus);
-        Assert.Contains("Server error", exception.Message);
+        // Default message for 500 is "HTTP 500"
+        Assert.Contains("HTTP", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithBuildHeadersOverride_ShouldMergeDefaultAndProvidedHeaders()
+    public async Task TypedPostAsync_WithNetworkError_ShouldThrowReplicatedNetworkError()
     {
-        // Exercise: BuildHeaders method merging default and provided headers
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        // Exercise: HttpRequestException is wrapped as ReplicatedNetworkError
+        var handler = new TestHttpMessageHandler(
+            _ => throw new HttpRequestException("Connection refused"));
+
+        var client = CreateHttpClient(handler);
+
+        var exception = await Assert.ThrowsAsync<ReplicatedNetworkError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
+        Assert.Contains("Connection refused", exception.Message);
+    }
+
+    [Fact]
+    public async Task TypedPostAsync_WithUnauthorizedError_ShouldThrowReplicatedAuthError()
+    {
+        // Exercise: 401 → ReplicatedAuthError with AOT-parsed message
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
-            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            Content = new StringContent(
+                @"{""message"":""Unauthorized"",""code"":""AUTH_FAILED""}",
+                Encoding.UTF8,
+                "application/json")
         });
 
-        var defaultHeaders = new Dictionary<string, string>
-        {
-            ["X-Default"] = "default-value",
-            ["X-Shared"] = "default-shared"
-        };
-
-        // Need to test BuildHeaders indirectly through request
-        var client = new ReplicatedHttpClientAsync(
-            "https://test.replicated.app",
-            TimeSpan.FromSeconds(30),
-            defaultHeaders,
-            new RetryPolicy { MaxRetries = 0 });
-
-        Dictionary<string, string>? capturedHeaders = null;
-        var testHandler = new TestHttpMessageHandler(
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
-            },
-            request =>
-            {
-                capturedHeaders = new Dictionary<string, string>();
-                foreach (var header in request.Headers)
-                {
-                    capturedHeaders[header.Key] = string.Join(", ", header.Value);
-                }
-            });
-
-        var field = typeof(ReplicatedHttpClientAsync).GetField(
-            "_httpClient",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field?.SetValue(client, new HttpClient(testHandler));
-
-        var providedHeaders = new Dictionary<string, string>
-        {
-            ["X-Provided"] = "provided-value",
-            ["X-Shared"] = "provided-shared" // Should override default
-        };
-
-        client.MakeRequest("GET", "/test", providedHeaders, null, null);
-
-        // Assert: provided headers override defaults, both are present
-        Assert.NotNull(capturedHeaders);
-        Assert.Equal("provided-shared", capturedHeaders["X-Shared"]);
-        Assert.Equal("default-value", capturedHeaders["X-Default"]);
-        Assert.Equal("provided-value", capturedHeaders["X-Provided"]);
-    }
-
-    [Fact]
-    public void MakeRequest_WithEmptyParameters_ShouldNotAddQueryString()
-    {
-        // Exercise: BuildQueryString with empty/null parameters
-        string? capturedQuery = null;
-        var handler = new TestHttpMessageHandler(
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
-            },
-            request => capturedQuery = request.RequestUri?.Query);
-
         var client = CreateHttpClient(handler);
 
-        client.MakeRequest("GET", "/test", null, null, new Dictionary<string, object>());
+        var exception = await Assert.ThrowsAsync<ReplicatedAuthError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
 
-        // Assert: empty dictionary should result in no query string
-        Assert.True(string.IsNullOrEmpty(capturedQuery) || capturedQuery == "");
-    }
-
-    [Fact]
-    public void MakeRequest_WithNullParameters_ShouldNotAddQueryString()
-    {
-        // Exercise: BuildQueryString with null parameters
-        string? capturedQuery = null;
-        var handler = new TestHttpMessageHandler(
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
-            },
-            request => capturedQuery = request.RequestUri?.Query);
-
-        var client = CreateHttpClient(handler);
-
-        client.MakeRequest("GET", "/test", null, null, null);
-
-        // Assert: null parameters should result in no query string
-        Assert.True(string.IsNullOrEmpty(capturedQuery) || capturedQuery == "");
+        Assert.Equal(401, exception.HttpStatus);
+        Assert.Equal("Unauthorized", exception.Message);
+        // AOT path: no dict-based JsonBody
+        Assert.Null(exception.JsonBody);
     }
 
     private static ReplicatedHttpClientAsync CreateHttpClient(TestHttpMessageHandler handler)
-    {
-        var client = new ReplicatedHttpClientAsync(
-            "https://test.replicated.app",
+        => new ReplicatedHttpClientAsync(
+            "http://test-replicated:3000",
             TimeSpan.FromSeconds(30),
-            null,
+            handler,
             new RetryPolicy { MaxRetries = 0 });
-
-        var field = typeof(ReplicatedHttpClientAsync).GetField(
-            "_httpClient",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        if (field != null)
-        {
-            field.SetValue(client, new HttpClient(handler));
-        }
-
-        return client;
-    }
 
     private class TestHttpMessageHandler : HttpMessageHandler
     {
@@ -305,22 +218,14 @@ public class HttpClientCodePathTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(Send(request, cancellationToken));
-        }
-
-        protected override HttpResponseMessage Send(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
             _requestCallback?.Invoke(request);
 
             if (_responseFactory != null)
             {
-                return _responseFactory(request);
+                return Task.FromResult(_responseFactory(request));
             }
 
-            return _response!;
+            return Task.FromResult(_response!);
         }
     }
 }
-

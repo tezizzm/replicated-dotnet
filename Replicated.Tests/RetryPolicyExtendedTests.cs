@@ -23,10 +23,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act - Validate by using it in a client (which validates internally)
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Should not throw, custom logic is valid
         Assert.NotNull(policy.ShouldRetry);
@@ -40,10 +37,7 @@ public class RetryPolicyExtendedTests
         var policy = new RetryPolicy { MaxRetries = 0 };
 
         // Act - Use policy in client (which validates internally)
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Should not throw (disabling retries is valid)
         Assert.NotNull(client);
@@ -57,8 +51,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert - Validation happens when building client/builder
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -77,8 +69,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert - Validation happens when building client
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -97,8 +87,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -118,8 +106,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -139,8 +125,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -160,8 +144,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -181,8 +163,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -203,8 +183,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -225,8 +203,6 @@ public class RetryPolicyExtendedTests
 
         // Act & Assert
         var builder = new ReplicatedClientBuilder()
-            .WithPublishableKey("replicated_pk_test_123")
-            .WithAppSlug("test_app")
             .WithRetryPolicy(policy);
 
         var exception = Assert.Throws<ArgumentException>(() => builder.Build());
@@ -250,10 +226,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Should not throw
         Assert.NotNull(client);
@@ -271,10 +244,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act - Use in client to validate
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            appSlug: "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Configuration is valid
         Assert.False(policy.RetryOnNetworkError);
@@ -293,10 +263,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert
         Assert.False(policy.RetryOnRateLimit);
@@ -315,10 +282,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert
         Assert.False(policy.RetryOnServerError);
@@ -338,10 +302,7 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Should not throw
         Assert.NotNull(client);
@@ -365,15 +326,12 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Custom logic should be set
         Assert.NotNull(policy.ShouldRetry);
         Assert.NotNull(client);
-        
+
         // Test the custom logic
         var networkError = new ReplicatedNetworkError("Network error");
         Assert.True(policy.ShouldRetry(networkError, 0));
@@ -397,13 +355,9 @@ public class RetryPolicyExtendedTests
         };
 
         // Act
-        var client = new ReplicatedClient(
-            "replicated_pk_test_123",
-            "test_app",
-            retryPolicy: policy);
+        var client = new ReplicatedClient(retryPolicy: policy);
 
         // Assert - Should not throw
         Assert.NotNull(client);
     }
 }
-

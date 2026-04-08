@@ -15,13 +15,13 @@ public class ServerFixture : IDisposable
     {
         // Check for custom TEST_BASE_URL first
         BaseUrl = Environment.GetEnvironmentVariable("TEST_BASE_URL");
-        
+
         // If not set, try to use the mock server
         if (string.IsNullOrWhiteSpace(BaseUrl))
         {
             BaseUrl = "https://localhost:5001";
         }
-        
+
         // Note: We don't throw SkipTestException here because we want tests to run
         // if the mock server is available. Tests will fail with connection errors
         // if the server is not running, which is the expected behavior.

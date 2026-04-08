@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Replicated;
@@ -13,18 +12,18 @@ namespace Replicated.Tests;
 
 /// <summary>
 /// Tests that execute actual HTTP client code paths to improve coverage.
-/// Uses HttpMessageHandler to mock HTTP responses and test HandleResponse methods.
+/// Uses HttpMessageHandler to mock HTTP responses and test TypedPostAsync methods.
 /// </summary>
 public class HttpClientExecutionTests
 {
     [Fact]
-    public void MakeRequest_WithSuccessfulJsonResponse_ShouldParseJson()
+    public async Task TypedPostAsync_WithSuccessfulJsonResponse_ShouldParseJson()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
-                @"{""key1"":""value1"",""key2"":123}",
+                @"{""instanceID"":""123"",""appSlug"":""my-app"",""appName"":""My Application""}",
                 Encoding.UTF8,
                 "application/json")
         });
@@ -32,16 +31,20 @@ public class HttpClientExecutionTests
         var client = CreateHttpClient(handler);
 
         // Act
-        var result = client.MakeRequest("GET", "/test");
+        var result = await client.TypedPostAsync(
+            "/api/v1/app/instance-tags",
+            new InstanceTagsRequest(false, new Dictionary<string, string>()),
+            ReplicatedJsonContext.Default.InstanceTagsRequest,
+            ReplicatedJsonContext.Default.AppInfo);
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("value1", result["key1"]?.ToString());
-        Assert.Equal(123, JsonSerializer.Deserialize<JsonElement>(result["key2"]?.ToString() ?? "").GetInt32());
+        Assert.Equal("123", result.InstanceId);
+        Assert.Equal("my-app", result.AppSlug);
     }
 
     [Fact]
-    public void MakeRequest_WithSuccessfulEmptyResponse_ShouldReturnEmptyDictionary()
+    public async Task TypedPostAsync_WithSuccessfulEmptyResponse_ShouldReturnDefault()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
@@ -52,34 +55,18 @@ public class HttpClientExecutionTests
         var client = CreateHttpClient(handler);
 
         // Act
-        var result = client.MakeRequest("GET", "/test");
+        var result = await client.TypedPostAsync(
+            "/api/v1/app/instance-tags",
+            new InstanceTagsRequest(false, new Dictionary<string, string>()),
+            ReplicatedJsonContext.Default.InstanceTagsRequest,
+            ReplicatedJsonContext.Default.AppInfo);
 
-        // Assert
-        Assert.NotNull(result);
-        Assert.Empty(result);
+        // Assert: empty body returns default (null record)
+        Assert.Null(result);
     }
 
     [Fact]
-    public void MakeRequest_WithSuccessfulNonJsonResponse_ShouldReturnEmptyDictionary()
-    {
-        // Arrange
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("not json", Encoding.UTF8, "text/plain")
-        });
-
-        var client = CreateHttpClient(handler);
-
-        // Act
-        var result = client.MakeRequest("GET", "/test");
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Empty(result);
-    }
-
-    [Fact]
-    public void MakeRequest_WithUnauthorizedError_ShouldThrowReplicatedAuthError()
+    public async Task TypedPostAsync_WithUnauthorizedError_ShouldThrowReplicatedAuthError()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
@@ -93,35 +80,48 @@ public class HttpClientExecutionTests
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedAuthError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedAuthError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(401, exception.HttpStatus);
         Assert.Equal("Invalid credentials", exception.Message);
         Assert.Equal("AUTH_FAILED", exception.Code);
     }
 
     [Fact]
-public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
+    public async Task TypedPostAsync_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
     {
         // Arrange
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage((HttpStatusCode)429)
+        var response = new HttpResponseMessage((HttpStatusCode)429)
         {
             Content = new StringContent(
                 @"{""message"":""Rate limit exceeded""}",
                 Encoding.UTF8,
-                "application/json"),
-            Headers = { { "Retry-After", "60" } }
-        });
+                "application/json")
+        };
+        response.Headers.Add("Retry-After", "60");
+        var handler = new TestHttpMessageHandler(response);
 
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedRateLimitError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedRateLimitError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(429, exception.HttpStatus);
         Assert.Equal("Rate limit exceeded", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithServerError_ShouldThrowReplicatedApiError()
+    public async Task TypedPostAsync_WithServerError_ShouldThrowReplicatedApiError()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
@@ -135,13 +135,19 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(500, exception.HttpStatus);
         Assert.Equal("Server error occurred", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithClientError_ShouldThrowReplicatedApiError()
+    public async Task TypedPostAsync_WithClientError_ShouldThrowReplicatedApiError()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
@@ -155,13 +161,19 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(400, exception.HttpStatus);
         Assert.Equal("Bad request", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithErrorResponseWithoutJsonMessage_ShouldUseDefaultMessage()
+    public async Task TypedPostAsync_WithErrorResponseWithoutJsonMessage_ShouldUseDefaultMessage()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
@@ -172,129 +184,19 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
+        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Equal(400, exception.HttpStatus);
-        // StatusCode.ToString() returns "BadRequest", not "400", so check for "HTTP" prefix
         Assert.Contains("HTTP", exception.Message);
     }
 
     [Fact]
-    public void MakeRequest_WithInvalidJsonErrorResponse_ShouldHandleGracefully()
-    {
-        // Arrange
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
-        {
-            Content = new StringContent("{ invalid json }", Encoding.UTF8, "application/json")
-        });
-
-        var client = CreateHttpClient(handler);
-
-        // Act & Assert - Should handle invalid JSON gracefully
-        var exception = Assert.Throws<ReplicatedApiError>(() => client.MakeRequest("GET", "/test"));
-        Assert.Equal(400, exception.HttpStatus);
-        Assert.NotNull(exception.HttpBody);
-    }
-
-    [Fact]
-    public void MakeRequest_WithResponseHeaders_ShouldExtractHeaders()
-    {
-        // Arrange
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("{}", Encoding.UTF8, "application/json")
-        };
-        response.Headers.Add("X-Request-Id", "12345");
-        response.Content.Headers.Add("Content-Length", "2");
-
-        var handler = new TestHttpMessageHandler(response);
-        var client = CreateHttpClient(handler);
-
-        // Act - This will throw, but we can check headers were extracted
-        client.MakeRequest("GET", "/test");
-
-        // For a successful response, headers are extracted but not exposed via exception
-        // This test mainly exercises the header extraction code path
-        Assert.True(true);
-    }
-
-    [Fact]
-    public async Task MakeRequestAsync_WithSuccessfulResponse_ShouldParseJson()
-    {
-        // Arrange
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(@"{""result"":""success""}", Encoding.UTF8, "application/json")
-        });
-
-        var client = CreateHttpClient(handler);
-
-        // Act
-        var result = await client.MakeRequestAsync("GET", "/test");
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal("success", result["result"]?.ToString());
-    }
-
-    [Fact]
-    public async Task MakeRequestAsync_WithErrorResponse_ShouldThrowException()
-    {
-        // Arrange
-        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.NotFound)
-        {
-            Content = new StringContent(@"{""message"":""Not found""}", Encoding.UTF8, "application/json")
-        });
-
-        var client = CreateHttpClient(handler);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ReplicatedApiError>(async () => 
-            await client.MakeRequestAsync("GET", "/test"));
-        
-        Assert.Equal(404, exception.HttpStatus);
-        Assert.Equal("Not found", exception.Message);
-    }
-
-    [Fact]
-    public void MakeRequest_WithQueryParameters_ShouldBuildQueryString()
-    {
-        // Arrange
-        string? capturedQuery = null;
-        var handler = new TestHttpMessageHandler(
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
-            },
-            request =>
-            {
-                // Capture query string before request is disposed
-                if (request.RequestUri != null)
-                {
-                    capturedQuery = request.RequestUri.Query;
-                }
-            });
-
-        var client = CreateHttpClient(handler);
-
-        // Act
-        var parameters = new Dictionary<string, object>
-        {
-            ["key1"] = "value1",
-            ["key2"] = "value with spaces",
-            ["key3"] = 123
-        };
-        client.MakeRequest("GET", "/test", null, null, parameters);
-
-        // Assert
-        Assert.NotNull(capturedQuery);
-        Assert.Contains("key1=value1", capturedQuery);
-        // Uri.EscapeDataString encodes spaces as %20, not +
-        Assert.True(capturedQuery.Contains("key2=value%20with%20spaces") || capturedQuery.Contains("key2"));
-        Assert.Contains("key3=123", capturedQuery);
-    }
-
-    [Fact]
-    public void MakeRequest_WithJsonData_ShouldSerializeJsonBody()
+    public async Task TypedPostAsync_WithJsonBody_ShouldSerializeRequestBody()
     {
         // Arrange
         string? capturedBody = null;
@@ -305,7 +207,6 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
             },
             request =>
             {
-                // Capture content before request is disposed
                 if (request.Content != null)
                 {
                     capturedBody = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -315,23 +216,21 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
         var client = CreateHttpClient(handler);
 
         // Act
-        var jsonData = new Dictionary<string, object>
-        {
-            ["field1"] = "value1",
-            ["field2"] = 456
-        };
-        client.MakeRequest("POST", "/test", null, jsonData, null);
+        await client.TypedPostAsync(
+            "/api/v1/app/instance-tags",
+            new InstanceTagsRequest(true, new Dictionary<string, string> { ["env"] = "prod", ["region"] = "us-east-1" }),
+            ReplicatedJsonContext.Default.InstanceTagsRequest,
+            ReplicatedJsonContext.Default.AppInfo);
 
         // Assert
         Assert.NotNull(capturedBody);
-        Assert.Contains("field1", capturedBody);
-        Assert.Contains("value1", capturedBody);
-        Assert.Contains("field2", capturedBody);
-        Assert.Contains("456", capturedBody);
+        Assert.Contains("env", capturedBody);
+        Assert.Contains("prod", capturedBody);
+        Assert.Contains("region", capturedBody);
     }
 
     [Fact]
-    public void MakeRequest_WithHttpRequestException_ShouldThrowReplicatedNetworkError()
+    public async Task TypedPostAsync_WithHttpRequestException_ShouldThrowReplicatedNetworkError()
     {
         // Arrange
         var handler = new TestHttpMessageHandler(
@@ -340,32 +239,22 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
         var client = CreateHttpClient(handler);
 
         // Act & Assert
-        var exception = Assert.Throws<ReplicatedNetworkError>(() => 
-            client.MakeRequest("GET", "/test"));
-        
+        var exception = await Assert.ThrowsAsync<ReplicatedNetworkError>(async () =>
+            await client.TypedPostAsync(
+                "/api/v1/app/instance-tags",
+                new InstanceTagsRequest(false, new Dictionary<string, string>()),
+                ReplicatedJsonContext.Default.InstanceTagsRequest,
+                ReplicatedJsonContext.Default.AppInfo));
+
         Assert.Contains("Network error", exception.Message);
     }
 
     private static ReplicatedHttpClientAsync CreateHttpClient(TestHttpMessageHandler handler)
-    {
-        var client = new ReplicatedHttpClientAsync(
-            "https://test.replicated.app",
+        => new ReplicatedHttpClientAsync(
+            "http://test-replicated:3000",
             TimeSpan.FromSeconds(30),
-            null,
-            new RetryPolicy { MaxRetries = 0 }); // Disable retries for predictable testing
-
-        // Replace internal HttpClient using reflection
-        var field = typeof(ReplicatedHttpClientAsync).GetField(
-            "_httpClient",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        if (field != null)
-        {
-            field.SetValue(client, new HttpClient(handler));
-        }
-
-        return client;
-    }
+            handler,
+            new RetryPolicy { MaxRetries = 0 });
 
     private class TestHttpMessageHandler : HttpMessageHandler
     {
@@ -391,23 +280,14 @@ public void MakeRequest_WithRateLimitError_ShouldThrowReplicatedRateLimitError()
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(Send(request, cancellationToken));
-        }
-
-        // Override Send for sync calls (used by MakeRequest sync method)
-        protected override HttpResponseMessage Send(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
             _requestCallback?.Invoke(request);
 
             if (_responseFactory != null)
             {
-                return _responseFactory(request);
+                return Task.FromResult(_responseFactory(request));
             }
 
-            return _response!;
+            return Task.FromResult(_response!);
         }
     }
 }
-

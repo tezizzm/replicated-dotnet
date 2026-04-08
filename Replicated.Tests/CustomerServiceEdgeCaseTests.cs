@@ -1,4 +1,7 @@
 using System;
+using System.Text.Json.Serialization.Metadata;
+using System.Threading;
+using System.Threading.Tasks;
 using Replicated;
 using Replicated.Services;
 using Xunit;
@@ -6,143 +9,107 @@ using Xunit;
 namespace Replicated.Tests;
 
 /// <summary>
-/// Tests for CustomerService edge cases and state management scenarios.
+/// Validation tests for AppService and LicenseService input parameters.
 /// </summary>
-public class CustomerServiceEdgeCaseTests
+public class AppServiceValidationTests
 {
-    [Fact]
-    public void GetOrCreate_WithCachedCustomerIdAndMatchingEmail_ShouldReturnCachedCustomer()
+    // ── Mock ──────────────────────────────────────────────────────────────────
+
+    private sealed class MockHttpClientContext : IHttpClientContext
     {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var customerService = new CustomerService(mockClient);
-        var email = "test@example.com";
-        
-        // Set cached customer ID and email in state manager
-        mockClient.StateManager.SetCustomerId("cached_customer_123");
-        mockClient.StateManager.SetCustomerEmail(email);
+        private readonly object? _getResponse;
+        public string? LastPath { get; private set; }
+        public string? LastMethod { get; private set; }
 
-        // Act
-        var customer = customerService.GetOrCreate(email);
+        public MockHttpClientContext(object? getResponse = null)
+            => _getResponse = getResponse;
 
-        // Assert - Should return customer with cached ID without making request
-        Assert.NotNull(customer);
-        Assert.Equal("cached_customer_123", customer.CustomerId);
-        Assert.Equal(email, customer.EmailAddress);
-    }
-
-    [Fact]
-    public void GetOrCreate_WithCachedCustomerIdButDifferentEmail_ShouldClearStateAndCreateNew()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var customerService = new CustomerService(mockClient);
-        var originalEmail = "original@example.com";
-        var newEmail = "new@example.com";
-        
-        // Set cached state
-        mockClient.StateManager.SetCustomerId("original_customer_123");
-        mockClient.StateManager.SetCustomerEmail(originalEmail);
-
-        // Act
-        var customer = customerService.GetOrCreate(newEmail, "Stable");
-
-        // Assert - Should clear old state and create new customer
-        Assert.NotNull(customer);
-        Assert.NotEqual("original_customer_123", customer.CustomerId);
-    }
-
-    [Fact]
-    public async Task GetOrCreateAsync_WithCachedCustomerIdAndMatchingEmail_ShouldReturnCachedCustomer()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var customerService = new CustomerService(mockClient);
-        var email = "test@example.com";
-        
-        mockClient.StateManager.SetCustomerId("cached_customer_123");
-        mockClient.StateManager.SetCustomerEmail(email);
-
-        // Act
-        var customer = await customerService.GetOrCreateAsync(email);
-
-        // Assert
-        Assert.NotNull(customer);
-        Assert.Equal("cached_customer_123", customer.CustomerId);
-    }
-
-    [Fact]
-    public async Task GetOrCreateAsync_WithCachedCustomerIdButDifferentEmail_ShouldClearStateAndCreateNew()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var customerService = new CustomerService(mockClient);
-        var originalEmail = "original@example.com";
-        var newEmail = "new@example.com";
-        
-        mockClient.StateManager.SetCustomerId("original_customer_123");
-        mockClient.StateManager.SetCustomerEmail(originalEmail);
-
-        // Act
-        var customer = await customerService.GetOrCreateAsync(newEmail);
-
-        // Assert
-        Assert.NotNull(customer);
-        Assert.NotEqual("original_customer_123", customer.CustomerId);
-    }
-
-    private static IReplicatedClient CreateMockClient()
-    {
-        return new MockReplicatedClient();
-    }
-
-    private class MockReplicatedClient : IReplicatedClient
-    {
-        public string PublishableKey => "test_key";
-        public string AppSlug => "test_app";
-        public string BaseUrl => "https://test.replicated.app";
-        public TimeSpan Timeout => TimeSpan.FromSeconds(30);
-        public string? StateDirectory => null;
-        public string MachineId => "test_machine_id";
-        public StateManager StateManager { get; }
-        public CustomerService Customer => new CustomerService(this);
-
-        public Dictionary<string, string> GetAuthHeaders()
+        public Task<TResp> GetAsync<TResp>(string path, JsonTypeInfo<TResp> responseTypeInfo,
+            CancellationToken cancellationToken = default)
         {
-            return new Dictionary<string, string> { ["Authorization"] = "Bearer test_token" };
+            LastPath = path;
+            LastMethod = "GET";
+            return Task.FromResult((TResp)_getResponse!);
         }
 
-        public Dictionary<string, object> MakeRequest(string method, string url, Dictionary<string, string>? headers = null, Dictionary<string, object>? jsonData = null, Dictionary<string, object>? parameters = null)
+        public Task<TResp> PostAsync<TReq, TResp>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            JsonTypeInfo<TResp> respType, CancellationToken cancellationToken = default)
         {
-            // Generate new customer ID for each request
-            var customerId = $"customer_{Guid.NewGuid().ToString("N")[..8]}";
-            return new Dictionary<string, object>
-            {
-                ["customer"] = new Dictionary<string, object>
-                {
-                    ["id"] = customerId,
-                    ["email"] = "test@example.com",
-                    ["instanceId"] = "instance_456"
-                },
-                ["instance_id"] = "instance_456"
-            };
+            LastPath = path;
+            LastMethod = "POST";
+            return Task.FromResult(default(TResp)!);
         }
 
-        public Task<Dictionary<string, object>> MakeRequestAsync(string method, string url, Dictionary<string, string>? headers = null, Dictionary<string, object>? jsonData = null, Dictionary<string, object>? parameters = null)
+        public Task PostAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(MakeRequest(method, url, headers, jsonData, parameters));
+            LastPath = path;
+            LastMethod = "POST";
+            return Task.CompletedTask;
         }
 
-        public MockReplicatedClient()
+        public Task PatchAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
         {
-            // Isolate state per test with unique app slug and temp directory
-            var uniqueSlug = $"test_app_{Guid.NewGuid().ToString("N")[..8]}";
-            var tempDir = Path.Combine(Path.GetTempPath(), $"replicated_state_{Guid.NewGuid().ToString("N")[..8]}");
-            Directory.CreateDirectory(tempDir);
-            StateManager = new StateManager(uniqueSlug, tempDir);
-            // Ensure clean
-            StateManager.ClearState();
+            LastPath = path;
+            LastMethod = "PATCH";
+            return Task.CompletedTask;
         }
+
+        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
+        {
+            LastPath = path;
+            LastMethod = "DELETE";
+            return Task.CompletedTask;
+        }
+    }
+
+    // ── AppService.DeleteCustomMetricAsync validation ─────────────────────────
+
+    [Fact]
+    public async Task DeleteCustomMetricAsync_NullMetricName_ThrowsArgumentException()
+    {
+        var ctx = new MockHttpClientContext();
+        var svc = new AppService(ctx);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.DeleteCustomMetricAsync(null!));
+    }
+
+    [Fact]
+    public async Task DeleteCustomMetricAsync_EmptyMetricName_ThrowsArgumentException()
+    {
+        var ctx = new MockHttpClientContext();
+        var svc = new AppService(ctx);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.DeleteCustomMetricAsync(""));
+    }
+
+    [Fact]
+    public async Task DeleteCustomMetricAsync_WhitespaceMetricName_ThrowsArgumentException()
+    {
+        var ctx = new MockHttpClientContext();
+        var svc = new AppService(ctx);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.DeleteCustomMetricAsync("  "));
+    }
+
+    // ── LicenseService.GetFieldAsync validation ───────────────────────────────
+
+    [Fact]
+    public async Task GetFieldAsync_NullFieldName_ThrowsArgumentException()
+    {
+        var ctx = new MockHttpClientContext();
+        var svc = new LicenseService(ctx);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.GetFieldAsync(null!));
+    }
+
+    [Fact]
+    public async Task GetFieldAsync_EmptyFieldName_ThrowsArgumentException()
+    {
+        var ctx = new MockHttpClientContext();
+        var svc = new LicenseService(ctx);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.GetFieldAsync(""));
     }
 }
-

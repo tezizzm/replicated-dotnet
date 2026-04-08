@@ -1,220 +1,163 @@
-using System;
-using System.Collections.Generic;
+using System.Text.Json.Serialization.Metadata;
+using System.Threading;
 using System.Threading.Tasks;
 using Replicated;
-using Replicated.Resources;
 using Replicated.Services;
 using Xunit;
 
 namespace Replicated.Tests;
 
 /// <summary>
-/// Tests for Instance class edge cases and error scenarios.
+/// Tests for LicenseService using a manual MockHttpClientContext.
 /// </summary>
-public class InstanceEdgeCaseTests
+public class LicenseServiceTests
 {
-    [Fact]
-    public void SetStatus_WithoutInstanceId_ShouldTriggerInstanceCreation()
+    // ── Mock ──────────────────────────────────────────────────────────────────
+
+    private sealed class MockHttpClientContext : IHttpClientContext
     {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123"); // No instance ID initially
+        private readonly object? _getResponse;
+        public string? LastPath { get; private set; }
+        public string? LastMethod { get; private set; }
 
-        // Act
-        instance.SetStatus("running");
+        public MockHttpClientContext(object? getResponse = null)
+            => _getResponse = getResponse;
 
-        // Assert - Should not throw (mock handles the instance creation)
-        Assert.NotNull(instance);
-    }
-
-    [Fact]
-    public async Task SetStatusAsync_WithoutInstanceId_ShouldTriggerInstanceCreation()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123");
-
-        // Act
-        await instance.SetStatusAsync("running");
-
-        // Assert - Should not throw
-        Assert.NotNull(instance);
-    }
-
-    [Fact]
-    public void SetVersion_WithoutInstanceId_ShouldTriggerInstanceCreation()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123");
-
-        // Act
-        instance.SetVersion("1.0.0");
-
-        // Assert - Should not throw
-        Assert.NotNull(instance);
-    }
-
-    [Fact]
-    public async Task SetVersionAsync_WithoutInstanceId_ShouldTriggerInstanceCreation()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123");
-
-        // Act
-        await instance.SetVersionAsync("1.0.0");
-
-        // Assert - Should not throw
-        Assert.NotNull(instance);
-    }
-
-    [Fact]
-    public void SendMetric_WithNullValue_ShouldThrowArgumentNullException()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => instance.SendMetric("test_metric", null!));
-    }
-
-    [Fact]
-    public async Task SendMetricAsync_WithNullValue_ShouldThrowArgumentNullException()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentNullException>(async () => await instance.SendMetricAsync("test_metric", null!));
-    }
-
-    [Theory]
-    [InlineData("running")]
-    [InlineData("RUNNING")]
-    [InlineData("Running")]
-    [InlineData("degraded")]
-    [InlineData("missing")]
-    [InlineData("unavailable")]
-    [InlineData("ready")]
-    [InlineData("updating")]
-    public void SetStatus_WithCaseInsensitiveStatus_ShouldAcceptAllCases(string status)
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert - Should not throw (validation accepts case-insensitive)
-        instance.SetStatus(status);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(-1)]
-    [InlineData(100)]
-    [InlineData(-100)]
-    [InlineData(int.MaxValue)]
-    [InlineData(int.MinValue)]
-    public void SendMetric_WithIntValues_ShouldAcceptAllIntegers(int value)
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert - Should not throw
-        instance.SendMetric("test_metric", value);
-    }
-
-    [Theory]
-    [InlineData(0.0)]
-    [InlineData(0.5)]
-    [InlineData(1.0)]
-    [InlineData(-1.0)]
-    [InlineData(100.99)]
-    [InlineData(double.MaxValue)]
-    [InlineData(double.MinValue)]
-    public void SendMetric_WithDoubleValues_ShouldAcceptAllDoubles(double value)
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert - Should not throw
-        instance.SendMetric("test_metric", value);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("a")]
-    [InlineData("test_value")]
-    [InlineData("Test Value With Spaces")]
-    public void SendMetric_WithStringValues_ShouldAcceptAllStrings(string value)
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert - Should not throw
-        instance.SendMetric("test_metric", value);
-    }
-
-    [Fact]
-    public void SendMetric_WithBooleanValues_ShouldAcceptBooleans()
-    {
-        // Arrange
-        var mockClient = CreateMockClient();
-        var instance = new Instance(mockClient, "customer_123", "instance_456");
-
-        // Act & Assert - Should not throw
-        instance.SendMetric("test_bool", true);
-        instance.SendMetric("test_bool", false);
-    }
-
-    private static IReplicatedClient CreateMockClient()
-    {
-        return new MockReplicatedClient();
-    }
-
-    private class MockReplicatedClient : IReplicatedClient
-    {
-        public string PublishableKey => "test_key";
-        public string AppSlug => "test_app";
-        public string BaseUrl => "https://test.replicated.app";
-        public TimeSpan Timeout => TimeSpan.FromSeconds(30);
-        public string? StateDirectory => null;
-        public string MachineId => "test_machine_id";
-        public StateManager StateManager => new StateManager("test_app");
-        public CustomerService Customer => new CustomerService(this);
-
-        public Dictionary<string, string> GetAuthHeaders()
+        public Task<TResp> GetAsync<TResp>(string path, JsonTypeInfo<TResp> responseTypeInfo,
+            CancellationToken cancellationToken = default)
         {
-            return new Dictionary<string, string> { ["Authorization"] = "Bearer test_token" };
+            LastPath = path;
+            LastMethod = "GET";
+            return Task.FromResult((TResp)_getResponse!);
         }
 
-        public Dictionary<string, object> MakeRequest(string method, string url, Dictionary<string, string>? headers = null, Dictionary<string, object>? jsonData = null, Dictionary<string, object>? parameters = null)
+        public Task<TResp> PostAsync<TReq, TResp>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            JsonTypeInfo<TResp> respType, CancellationToken cancellationToken = default)
         {
-            // Return mock response for instance creation
-            if (url.Contains("/v3/instance"))
-            {
-                return new Dictionary<string, object>
-                {
-                    ["instance"] = new Dictionary<string, object>
-                    {
-                        ["id"] = "instance_456"
-                    },
-                    ["instance_id"] = "instance_456"
-                };
-            }
-            return new Dictionary<string, object> { ["success"] = true };
+            LastPath = path;
+            LastMethod = "POST";
+            return Task.FromResult(default(TResp)!);
         }
 
-        public Task<Dictionary<string, object>> MakeRequestAsync(string method, string url, Dictionary<string, string>? headers = null, Dictionary<string, object>? jsonData = null, Dictionary<string, object>? parameters = null)
+        public Task PostAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(MakeRequest(method, url, headers, jsonData, parameters));
+            LastPath = path;
+            LastMethod = "POST";
+            return Task.CompletedTask;
         }
+
+        public Task PatchAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
+        {
+            LastPath = path;
+            LastMethod = "PATCH";
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
+        {
+            LastPath = path;
+            LastMethod = "DELETE";
+            return Task.CompletedTask;
+        }
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetInfoAsync_ReturnsLicenseInfo()
+    {
+        var expected = new LicenseInfo(
+            LicenseId: "lic-123",
+            LicenseType: "prod",
+            CustomerName: "Acme Corp",
+            CustomerEmail: "admin@acme.com",
+            ChannelName: "Stable",
+            Entitlements: System.Array.Empty<LicenseEntitlement>());
+
+        var ctx = new MockHttpClientContext(expected);
+        var svc = new LicenseService(ctx);
+
+        var result = await svc.GetInfoAsync();
+
+        Assert.Equal(expected, result);
+        Assert.Equal("/api/v1/license/info", ctx.LastPath);
+        Assert.Equal("GET", ctx.LastMethod);
+    }
+
+    [Fact]
+    public async Task GetFieldsAsync_ReturnsLicenseFieldArray()
+    {
+        var expected = new[]
+        {
+            new LicenseField(Name: "seats", Description: "Number of seats", Value: "50", Signature: null)
+        };
+
+        var ctx = new MockHttpClientContext(expected);
+        var svc = new LicenseService(ctx);
+
+        var result = await svc.GetFieldsAsync();
+
+        Assert.Equal(expected, result);
+        Assert.Equal("/api/v1/license/fields", ctx.LastPath);
+        Assert.Equal("GET", ctx.LastMethod);
+    }
+
+    [Fact]
+    public async Task GetFieldAsync_CallsGetWithFieldNameInPath()
+    {
+        var expected = new LicenseField(
+            Name: "my-field",
+            Description: "A field",
+            Value: "42",
+            Signature: null);
+
+        var ctx = new MockHttpClientContext(expected);
+        var svc = new LicenseService(ctx);
+
+        var result = await svc.GetFieldAsync("my-field");
+
+        Assert.Equal(expected, result);
+        Assert.Contains("my-field", ctx.LastPath);
+        Assert.Equal("GET", ctx.LastMethod);
+    }
+
+    [Fact]
+    public async Task GetInfoAsync_WithCancelledToken_ThrowsOperationCanceledException()
+    {
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+
+        var ctx = new CancellingMockContext();
+        var svc = new LicenseService(ctx);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            svc.GetInfoAsync(cts.Token));
+    }
+
+    private sealed class CancellingMockContext : IHttpClientContext
+    {
+        public Task<TResp> GetAsync<TResp>(string path, JsonTypeInfo<TResp> responseTypeInfo,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(default(TResp)!);
+        }
+
+        public Task<TResp> PostAsync<TReq, TResp>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            JsonTypeInfo<TResp> respType, CancellationToken cancellationToken = default)
+            => Task.FromResult(default(TResp)!);
+
+        public Task PostAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task PatchAsync<TReq>(string path, TReq body, JsonTypeInfo<TReq> reqType,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteAsync(string path, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }
-
